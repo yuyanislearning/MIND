@@ -26,6 +26,7 @@ def handle_flags():
 
     # Model parameters.
     flags.DEFINE_bool("multilabel", True, "multilabel or not (default: True)")
+    flags.DEFINE_bool("class_weights", True, "use class weights or not (default: True)")
 
     # Training parameters.
     flags.DEFINE_integer("seq_len", 512, "maximum lenth+2 of the model sequence (default: 512)")
@@ -79,7 +80,7 @@ class Data:
                 })
         logging.info('Loaded {} records from {}.'.format(len(self.records),
             file_name))
-    def encode_data( self, seq_len,  unique_labels, negative_sampling=False,is_binary=False, is_multilabel=True):
+    def encode_data( self, seq_len,  unique_labels, class_weights=None, negative_sampling=False,is_binary=False, is_multilabel=True):
         # Encode the labels
         self.filter_records = [self.records[i] for i, r in enumerate(self.records) if len(r['seq'])<=(seq_len-2)]
         
@@ -114,6 +115,9 @@ class Data:
                 else:
                     sample_weights[i, 1:(1+len(data_seq)), :] = 1
         Y = Y.reshape((len(data_seq),-1, 1))
+        if class_weights is None:
+            class_weights = np.repeat([1], len(unique_labels))
+        sample_weights = np.tile(class_weights, (len(data_seq), seq_len, 1)) * sample_weights
         sample_weights = sample_weights.reshape((len(data_seq), -1, 1))
         self.Y  = Y
         self.sample_weights = sample_weights
@@ -149,6 +153,25 @@ def get_unique_labels(train_set, valid_set, test_set):
                     set([l['ptm_type'] for d in test_set.records for l in d['label'] ])))
 
 
+def get_class_weights(train_set, valid_set, test_set, unique_labels):
+    class_weights = {u:0 for u in unique_labels}
+
+    for d in train_set.records:
+        for l in d['label']:
+            class_weights[l['ptm_type']]+=1 
+    
+    for d in valid_set.records:
+        for l in d['label']:
+            class_weights[l['ptm_type']]+=1 
+    
+    for d in test_set.records:
+        for l in d['label']:
+            class_weights[l['ptm_type']]+=1 
+    
+    class_weights = [float(class_weights[u]) for u in unique_labels]
+    mean_w = sum(class_weights)/len(class_weights)
+    class_weights = np.array([mean_w/u for u in class_weights])
+    return class_weights
 
 def tokenize_seqs(seqs, seq_len):
     # Note that tokenize_seq already adds <START> and <END> tokens.

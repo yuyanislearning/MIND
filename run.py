@@ -20,7 +20,7 @@ from sklearn.metrics import recall_score
 from tqdm import tqdm
 import yaml
 
-from src.utils import get_unique_labels, Data, handle_flags, limit_gpu_memory_growth
+from src.utils import get_class_weights, get_unique_labels, Data, handle_flags, limit_gpu_memory_growth
 from src import utils
 from src.model import RNN_model
 
@@ -52,9 +52,10 @@ def main(argv):
     val_data = utils.Data(data_prefix+'val.json', FLAGS)
 
     unique_labels = get_unique_labels(train_data, val_data, test_data)
-    train_data.encode_data( FLAGS.seq_len,  unique_labels)
+    class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
+    train_data.encode_data( FLAGS.seq_len,  unique_labels, class_weights)
     test_data.encode_data( FLAGS.seq_len,  unique_labels, negative_sampling=False)
-    val_data.encode_data( FLAGS.seq_len,  unique_labels, negative_sampling=False)
+    val_data.encode_data( FLAGS.seq_len,  unique_labels,  negative_sampling=False)
 
     optimizer = tf.keras.optimizers.Adam(
             learning_rate=FLAGS.learning_rate, amsgrad=True)
