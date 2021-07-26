@@ -25,8 +25,10 @@ def handle_flags():
 
 
     # Model parameters.
-    flags.DEFINE_bool("multilabel", True, "multilabel or not (default: True)")
-    flags.DEFINE_bool("class_weights", True, "use class weights or not (default: True)")
+    flags.DEFINE_bool("multilabel", False, "multilabel or not (default: True)")
+    flags.DEFINE_bool("binary", True, "Binary or not (default: True)")
+    flags.DEFINE_bool("spec_neg_sam", True, "use ptm-specific negative sampling or not (default: True)")
+    flags.DEFINE_bool("class_weights", False, "use class weights or not (default: True)")
 
     # Training parameters.
     flags.DEFINE_integer("seq_len", 512, "maximum lenth+2 of the model sequence (default: 512)")
@@ -67,7 +69,7 @@ class Data:
         flatten = lambda l: [item for sublist in l for item in sublist]
         with open(file_name, 'r') as fp:
             dat = json.load(fp)
-            for k in dat.keys():
+            for k in dat:
                 # some case that the data miss sequence, skip
                 if dat[k].get('seq',-1)==-1:
                     continue
@@ -80,12 +82,15 @@ class Data:
                 })
         logging.info('Loaded {} records from {}.'.format(len(self.records),
             file_name))
-    def encode_data( self, seq_len,  unique_labels, class_weights=None, negative_sampling=False,is_binary=False, is_multilabel=True):
-        # Encode the labels
+    def encode_data( self, seq_len,  unique_labels, class_weights=None, negative_sampling=False,is_binary=True, is_multilabel=False, spec_neg_sam=True):
+        data_seq = [d['seq'] for d in self.records]
+        data_label = [ d['label'] for d in self.records]
+        data_uid = [d['uid'] for d in self.records]        
         self.filter_records = [self.records[i] for i, r in enumerate(self.records) if len(r['seq'])<=(seq_len-2)]
         
         data_seq = [d['seq'] for d in self.filter_records]
         data_label = [ d['label'] for d in self.filter_records]
+        data_uid = [d['uid'] for d in self.filter_records]
         if is_multilabel:
             label_to_index = {str(label): i for i, label in enumerate(unique_labels)}
             Y = np.zeros((len(data_seq), seq_len, len(unique_labels))) 
@@ -114,16 +119,53 @@ class Data:
                             break
                 else:
                     sample_weights[i, 1:(1+len(data_seq)), :] = 1
-        Y = Y.reshape((len(data_seq),-1, 1))
-        if class_weights is None:
-            class_weights = np.repeat([1], len(unique_labels))
-        sample_weights = np.tile(class_weights, (len(data_seq), seq_len, 1)) * sample_weights
-        sample_weights = sample_weights.reshape((len(data_seq), -1, 1))
+            
+            Y = Y.reshape((len(data_seq),-1, 1))
+            if class_weights is None:
+                class_weights = np.repeat([1], len(unique_labels))
+            sample_weights = np.tile(class_weights, (len(data_seq), seq_len, 1)) * sample_weights
+            sample_weights = sample_weights.reshape((len(data_seq), -1, 1))
+        if is_binary:
+            all_Y = []
+            all_wei = []
+            all_X = []
+
+            for ul in unique_labels:
+                Y = np.zeros((len(data_seq), seq_len)) 
+                sample_weights = np.zeros((len(data_seq), seq_len))
+                for i, seq in enumerate(data_seq):
+                    ptm_type = set()
+                    pos_ind = []
+                    for j, lbl in enumerate(data_label[i]):
+                        if lbl['ptm_type']==ul:
+                            Y[i, int(lbl['site'])+1] = 1
+                            sample_weights[i, int(lbl['site'])+1] =1
+                            ptm_type = ptm_type.union(seq[lbl['site']])
+                            pos_ind.append(lbl['site'])
+                    if spec_neg_sam:
+                        if len(ptm_type)>0:
+                            neg_ind = set([ii for ii, aa in enumerate(seq) if aa in list(ptm_type)])
+                            neg_ind = np.array(list(neg_ind - set(pos_ind))).astype(int)
+                            if len(neg_ind)>0:
+                                k = min(len(pos_ind), len(neg_ind))
+                                neg_ind = np.random.choice(neg_ind, k, False)
+                                sample_weights[i, neg_ind+1] = 1
+                pos_y_ind = np.where(np.sum(Y, axis = 1)>0)[0]
+                all_Y.append(np.expand_dims(Y[pos_y_ind,:], axis = 2))
+                all_wei.append(np.expand_dims(sample_weights[pos_y_ind,:], axis = 2))
+                temp_data_seq = [data_seq[ii] for ii in pos_y_ind]
+                all_X.append(tokenize_seqs(temp_data_seq, seq_len))
+            Y = all_Y
+            sample_weights = all_wei
+            X = all_X   
+                   
         self.Y  = Y
         self.sample_weights = sample_weights
         
         # Encode X
-        self.X = tokenize_seqs(data_seq, seq_len)
+        if not is_binary:
+            X = tokenize_seqs(data_seq, seq_len)
+        self.X = X
             
     def batch_iter(self, is_random=True):
         if is_random:

@@ -8,61 +8,83 @@ from sklearn.metrics import f1_score, precision_recall_curve, auc, roc_auc_score
 from .tokenization import  n_tokens
 
 import pprint
-
+import pdb
 
 
 class Raw_model():
     def __init__(self, optimizer , loss_object):
         self.optimizer = optimizer
         self.loss_object = loss_object
-    def train(self, encoded_train_set, encoded_valid_set, seq_len, batch_size, n_epochs, lr = None, callbacks=[]):
-        
-        train_X, train_Y, train_sample_weights = encoded_train_set.X, encoded_train_set.Y, encoded_train_set.sample_weights
+    def train(self, encoded_train_set, encoded_valid_set, seq_len, batch_size, n_epochs, lr = None, callbacks=[], binary=None,ind=None):
+        # pdb.set_trace()
+        train_X, train_Y, train_sample_weights = (encoded_train_set.X[ind], encoded_train_set.Y[ind], encoded_train_set.sample_weights[ind]) if binary \
+            else (encoded_train_set.X, encoded_train_set.Y, encoded_train_set.sample_weights)
 
-        val_set = (encoded_valid_set.X, encoded_valid_set.Y, encoded_valid_set.sample_weights)
+        val_set = (encoded_valid_set.X[ind], encoded_valid_set.Y[ind], encoded_valid_set.sample_weights[ind]) if binary \
+            else (encoded_valid_set.X, encoded_valid_set.Y, encoded_valid_set.sample_weights)
 
+        # pdb.set_trace()
         self.model.fit(train_X, train_Y, sample_weight = train_sample_weights, batch_size = batch_size, epochs = n_epochs, validation_data = val_set, \
                 callbacks = callbacks)
-    def eval(self, seq_len,test_data, batch_size, unique_labels):
-        test_X, test_Y, test_sample_weights = test_data.X, test_data.Y, test_data.sample_weights
+    def eval(self, seq_len,test_data, batch_size, unique_labels,binary, ind=None):
+        test_X, test_Y, test_sample_weights = (test_data.X[ind], test_data.Y[ind], test_data.sample_weights[ind]) if binary \
+            else (test_data.X, test_data.Y, test_data.sample_weights)
         y_pred = self.model.predict(test_X, batch_size)
         
-        y_mask = test_sample_weights.reshape(-1, seq_len, len(unique_labels))
-        y_true = test_Y.reshape(-1, seq_len, len(unique_labels))
-        y_pred = y_pred.reshape(-1, seq_len, len(unique_labels))
+        if not binary:
+            y_mask = test_sample_weights.reshape(-1, seq_len, len(unique_labels))
+            y_true = test_Y.reshape(-1, seq_len, len(unique_labels))
+            y_pred = y_pred.reshape(-1, seq_len, len(unique_labels))
+        else:
+            y_mask = test_sample_weights
+            y_true = test_Y
+            
 
-        y_trues = [y_true[:,:,i][y_mask[:,:,i]==1] for i in range(len(unique_labels))]
-        y_preds = [y_pred[:,:,i][y_mask[:,:,i]==1] for i in range(len(unique_labels))]
+        y_trues = y_true[y_mask==1] if binary \
+            else [y_true[:,:,i][y_mask[:,:,i]==1] for i in range(len(unique_labels))]
+        y_preds = y_pred[y_mask==1] if binary \
+            else [y_pred[:,:,i][y_mask[:,:,i]==1] for i in range(len(unique_labels))]
 
         ptm_type = {i:p for i, p in enumerate(unique_labels)}
         AUC = {}
         PR_AUC = {}
-        for i in range(len(unique_labels)):
-            AUC[ptm_type[i]] = roc_auc_score(y_trues[i], y_preds[i]) 
-            PR_AUC[ptm_type[i]] = precision_recall_AUC(y_trues[i], y_preds[i]) 
-            confusion_matrixs=pd.DataFrame(confusion_matrix(y_trues[i], y_preds[i]>=0.5, labels = np.array([0,1])), index = ['0','1'],columns = ['0','1'])
-            print(ptm_type[i]+' confusion matrix')
-            print(confusion_matrixs)
-            confusion_matrixs=None
+        if binary:
+            AUC = roc_auc_score(y_trues, y_preds)
+            PR_AUC = precision_recall_AUC(y_trues, y_preds) 
+            confusion_matrixs=pd.DataFrame(confusion_matrix(y_trues, y_preds>=0, labels = np.array([0,1])), index = ['0','1'],columns = ['0','1'])
+            print(unique_labels[ind])
+            print(confusion_matrixs)    
+            print('PR_AUC')
+            pprint.pprint(PR_AUC)
+            print('AUC')
+            pprint.pprint(AUC)
+        else:
+            for i in range(len(unique_labels)):
+                AUC[ptm_type[i]] = roc_auc_score(y_trues[i], y_preds[i]) 
+                PR_AUC[ptm_type[i]] = precision_recall_AUC(y_trues[i], y_preds[i]) 
+                confusion_matrixs=pd.DataFrame(confusion_matrix(y_trues[i], y_preds[i]>=0.5, labels = np.array([0,1])), index = ['0','1'],columns = ['0','1'])
+                print(ptm_type[i]+' confusion matrix')
+                print(confusion_matrixs)
+                confusion_matrixs=None
         
-                
-        print('PR_AUC')
-        pprint.pprint(PR_AUC)
-        
-        print('AUC')
-        pprint.pprint(AUC)
+            print('PR_AUC')
+            pprint.pprint(PR_AUC)
+            
+            print('AUC')
+            pprint.pprint(AUC)
 
 class RNN_model(Raw_model):
     def __init__(self, optimizer_class, loss_object):
         Raw_model.__init__(self, optimizer_class, loss_object )
-    def create_model(self, seq_len, d_hidden_seq, unique_labels):
+    def create_model(self, seq_len, d_hidden_seq, unique_labels, is_binary=None):
         model = keras.Sequential()
         # input_seq = keras.layers.Input(shape = (seq_len,), dtype = np.int32, name = 'input-seq')
         model.add(layers.Embedding(n_tokens, d_hidden_seq, name = 'embedding-seq-input')) 
         model.add(
             layers.Bidirectional(layers.LSTM(128, input_dim=seq_len, return_sequences=True)))
-        model.add(layers.Dense(len(unique_labels), activation = 'sigmoid'))
-        model.add(layers.Reshape((-1,)))
+        model.add(layers.Dense(1) if is_binary else layers.Dense(len(unique_labels)))
+        if not is_binary:
+            model.add(layers.Reshape((-1,)))
 
         self.model = model
         self.model.compile(
