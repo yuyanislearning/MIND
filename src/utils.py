@@ -11,7 +11,7 @@ except:
     import json
 from Bio import SeqIO
 
-from .tokenization import additional_token_to_index, n_tokens, tokenize_seq
+from .tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index
 
 
 
@@ -19,6 +19,8 @@ from .tokenization import additional_token_to_index, n_tokens, tokenize_seq
 def handle_flags():
     flags.DEFINE_string("tflog",
             '3', "The setting for TF_CPP_MIN_LOG_LEVEL (default: 3)")
+    flags.DEFINE_string('model',
+            'proteinbert', 'model to use (default: proteinbert)')
     # Data configuration.
     flags.DEFINE_string('config',
             'config.yml', 'configure file (default: config.yml)')
@@ -29,12 +31,13 @@ def handle_flags():
     flags.DEFINE_bool("binary", True, "Binary or not (default: True)")
     flags.DEFINE_bool("spec_neg_sam", True, "use ptm-specific negative sampling or not (default: True)")
     flags.DEFINE_bool("class_weights", False, "use class weights or not (default: True)")
+    flags.DEFINE_bool("short", True, "use only partial sequence (default: True)")
 
     # Training parameters.
-    flags.DEFINE_integer("seq_len", 512, "maximum lenth+2 of the model sequence (default: 512)")
-    flags.DEFINE_integer("batch_size", 32, "Batch Size (default: 32)")
+    flags.DEFINE_integer("seq_len", 35, "maximum lenth+2 of the model sequence (default: 512)")
+    flags.DEFINE_integer("batch_size", 32*16, "Batch Size (default: 32)")
     flags.DEFINE_integer("num_epochs",
-            20, "Number of training epochs (default: 20)")
+            120, "Number of training epochs (default: 20)")
     flags.DEFINE_integer('random_seed',
             252, 'Random seeds for reproducibility (default: 252)')
     flags.DEFINE_float('learning_rate',
@@ -82,10 +85,8 @@ class Data:
                 })
         logging.info('Loaded {} records from {}.'.format(len(self.records),
             file_name))
-    def encode_data( self, seq_len,  unique_labels, class_weights=None, negative_sampling=False,is_binary=True, is_multilabel=False, spec_neg_sam=True):
-        data_seq = [d['seq'] for d in self.records]
-        data_label = [ d['label'] for d in self.records]
-        data_uid = [d['uid'] for d in self.records]        
+    def encode_data( self, seq_len,  unique_labels, class_weights=None, negative_sampling=False,is_binary=True, is_multilabel=False, spec_neg_sam=True, proteinbert=True, evaluate=False):
+
         self.filter_records = [self.records[i] for i, r in enumerate(self.records) if len(r['seq'])<=(seq_len-2)]
         
         data_seq = [d['seq'] for d in self.filter_records]
@@ -145,16 +146,24 @@ class Data:
                     if spec_neg_sam:
                         if len(ptm_type)>0:
                             neg_ind = set([ii for ii, aa in enumerate(seq) if aa in list(ptm_type)])
-                            neg_ind = np.array(list(neg_ind - set(pos_ind))).astype(int)
-                            if len(neg_ind)>0:
-                                k = min(len(pos_ind), len(neg_ind))
-                                neg_ind = np.random.choice(neg_ind, k, False)
+                            if evaluate:
+                                neg_ind = np.array(list(neg_ind))
                                 sample_weights[i, neg_ind+1] = 1
+                            else:
+                                neg_ind = np.array(list(neg_ind - set(pos_ind))).astype(int)
+                                if len(neg_ind)>0:
+                                    k = min(len(pos_ind), len(neg_ind))
+                                    neg_ind = np.random.choice(neg_ind, k, False)
+                                    sample_weights[i, neg_ind+1] = 1
                 pos_y_ind = np.where(np.sum(Y, axis = 1)>0)[0]
                 all_Y.append(np.expand_dims(Y[pos_y_ind,:], axis = 2))
                 all_wei.append(np.expand_dims(sample_weights[pos_y_ind,:], axis = 2))
                 temp_data_seq = [data_seq[ii] for ii in pos_y_ind]
-                all_X.append(tokenize_seqs(temp_data_seq, seq_len))
+                if proteinbert:
+                    all_X.append([
+                        tokenize_seqs(temp_data_seq, seq_len),np.zeros((len(temp_data_seq), 8943), dtype = np.int8)])
+                else:
+                    all_X.append(tokenize_seqs(temp_data_seq, seq_len))
             Y = all_Y
             sample_weights = all_wei
             X = all_X   
@@ -162,11 +171,69 @@ class Data:
         self.Y  = Y
         self.sample_weights = sample_weights
         
-        # Encode X
+        # Encode X 
         if not is_binary:
             X = tokenize_seqs(data_seq, seq_len)
         self.X = X
-            
+        
+
+    def encode_data_short( self, seq_len,  unique_labels, is_binary=True,  spec_neg_sam=True, proteinbert=True):        
+        data_seq = [d['seq'] for d in self.records]
+        data_label = [ d['label'] for d in self.records]
+        half_len = (seq_len-2)//2
+        other_token_index = additional_token_to_index['<OTHER>']
+        # data_uid = [d['uid'] for d in self.records]
+        if is_binary:
+            all_Y = []
+            all_X = []
+            all_wei = []
+
+            for ul in unique_labels:
+                Y = []
+                X = []
+                # sample_weights = np.zeros((len(data_seq), seq_len))
+                for i, seq in enumerate(data_seq):
+                    ptm_type = set()
+                    pos_ind = []
+                    for j, lbl in enumerate(data_label[i]):
+                        if lbl['ptm_type']==ul:
+                            Y.append(1)                            
+                            ptm_type = ptm_type.union(seq[lbl['site']])
+                            pos_ind.append(lbl['site'])
+                            # retrieval seq where ptm happens in the middle
+                            s = retri_seq(lbl['site'], half_len, seq, other_token_index)
+                            assert len(s)==seq_len
+                            X.append(np.array(s))
+                    if spec_neg_sam:
+                        if len(ptm_type)>0:
+                            neg_ind = set([ii for ii, aa in enumerate(seq) if aa in list(ptm_type)])
+                            # if evaluate:
+                            neg_ind = np.array(list(neg_ind - set(pos_ind))).astype(int)
+                            for ni in neg_ind:
+                                Y.append(0)
+                                s = retri_seq(ni, half_len, seq, other_token_index)
+                                X.append(s)
+                            # else:
+                            #     neg_ind = np.array(list(neg_ind - set(pos_ind))).astype(int)
+                            #     if len(neg_ind)>0:
+                            #         k = min(len(pos_ind), len(neg_ind))
+                            #         neg_ind = np.random.choice(neg_ind, k, False)
+                            #         sample_weights[i, neg_ind+1] = 1
+                all_Y.append(np.array(Y))
+                all_wei.append(np.ones(np.array(Y).shape))
+                if proteinbert:
+                    all_X.append([
+                        np.array(X),np.zeros((len(X), 8943), dtype = np.int8)])
+                else:
+                    all_X.append(np.array(X))
+            Y = all_Y
+            X = all_X   
+                   
+        self.Y  = Y
+        self.X = X
+        self.sample_weights = all_wei
+        # pdb.set_trace()
+
     def batch_iter(self, is_random=True):
         if is_random:
             random.shuffle(self.records)
@@ -218,3 +285,20 @@ def get_class_weights(train_set, valid_set, test_set, unique_labels):
 def tokenize_seqs(seqs, seq_len):
     # Note that tokenize_seq already adds <START> and <END> tokens.
     return np.array([seq_tokens + (seq_len - len(seq_tokens)) * [additional_token_to_index['<PAD>']] for seq_tokens in map(tokenize_seq, seqs)], dtype = np.int32)
+
+def retri_seq(site, half_len, seq, other_token_index):
+    if site < half_len:
+        left_s = seq[0:site+1]
+    else:
+        left_s = seq[(site-half_len):(site+1)]
+    if site + half_len > len(seq):
+        right_s = seq[(site+1):len(seq)]
+    else:
+        right_s = seq[(site+1):(site+half_len+1)]
+    left_s = [additional_token_to_index['<START>']] + [aa_to_token_index.get(aa, other_token_index) for aa in parse_seq(left_s)]
+    right_s = [aa_to_token_index.get(aa, other_token_index) for aa in parse_seq(right_s)] + [additional_token_to_index['<END>']]
+    left_s = (half_len+2 - len(left_s)) * [additional_token_to_index['<PAD>']] + left_s
+    right_s = right_s + (half_len+1 - len(right_s)) * [additional_token_to_index['<PAD>']]
+    s = left_s + right_s    
+
+    return s

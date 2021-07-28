@@ -22,7 +22,7 @@ import yaml
 
 from src.utils import get_class_weights, get_unique_labels, Data, handle_flags, limit_gpu_memory_growth
 from src import utils
-from src.model import RNN_model
+from src.model import ProteinBert, RNN_model
 
 handle_flags()
 
@@ -53,9 +53,17 @@ def main(argv):
 
     unique_labels = get_unique_labels(train_data, val_data, test_data)
     class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
-    train_data.encode_data( FLAGS.seq_len,  unique_labels, class_weights, is_multilabel=FLAGS.multilabel, is_binary=FLAGS.binary, spec_neg_sam=FLAGS.spec_neg_sam)
-    test_data.encode_data( FLAGS.seq_len,  unique_labels, is_multilabel=FLAGS.multilabel, is_binary=FLAGS.binary,negative_sampling=False,spec_neg_sam=FLAGS.spec_neg_sam)
-    val_data.encode_data( FLAGS.seq_len,  unique_labels, is_multilabel=FLAGS.multilabel, is_binary=FLAGS.binary, negative_sampling=False, spec_neg_sam=FLAGS.spec_neg_sam)
+    if FLAGS.short:
+        train_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
+        test_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
+        val_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
+    else:
+        train_data.encode_data( FLAGS.seq_len,  unique_labels, class_weights, is_multilabel=FLAGS.multilabel, \
+            is_binary=FLAGS.binary, spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert', evaluate=False)
+        test_data.encode_data( FLAGS.seq_len,  unique_labels, is_multilabel=FLAGS.multilabel, \
+            is_binary=FLAGS.binary,negative_sampling=False,spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert', evaluate=True)
+        val_data.encode_data( FLAGS.seq_len,  unique_labels, is_multilabel=FLAGS.multilabel, \
+            is_binary=FLAGS.binary, negative_sampling=False, spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert', evaluate=True)
 
     optimizer = tf.keras.optimizers.Adam(
             learning_rate=FLAGS.learning_rate, amsgrad=True)
@@ -63,23 +71,35 @@ def main(argv):
     loss_object = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
     # Build model
-    model = RNN_model(optimizer, loss_object)
-    model.create_model(FLAGS.seq_len, 128, unique_labels, FLAGS.binary)
+    if FLAGS.model=='proteinbert':
+        model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, FLAGS.short)
+        model.create_model( train_data,  FLAGS.seq_len,   binary=FLAGS.binary, freeze_pretrained_layers=False)
+    else:
+        model = RNN_model(optimizer, loss_object)
+        model.create_model(FLAGS.seq_len, 128, unique_labels, FLAGS.binary)
 
     # Optimization settings.
     if not FLAGS.binary:
-        model.train( train_data, val_data, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, lr = None, callbacks=training_callbacks)
+        model.train( train_data, val_data, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, lr = FLAGS.learning_rate, callbacks=training_callbacks)
 
         logging.info('------------------evaluate---------------------' )
 
         model.eval(FLAGS.seq_len,test_data, FLAGS.batch_size, unique_labels)
     if FLAGS.binary:
         # train on large samples first
-        sort_ind = np.argsort(np.array([train_data.Y[i].shape[0] for i in range(len(train_data.Y))]))
+        sort_ind = np.argsort(-np.array([train_data.Y[i].shape[0] for i in range(len(train_data.Y))]))
+        AUCs, PR_AUCs, confu_mats = {}, {}, {}
         for i in sort_ind:
-            model.train(train_data, val_data, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, lr = None, callbacks=training_callbacks, binary=FLAGS.binary, ind=i)
-            model.eval(FLAGS.seq_len,test_data, FLAGS.batch_size, unique_labels, binary=FLAGS.binary, ind=i)
+            model.train(train_data, val_data, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, lr = FLAGS.learning_rate, callbacks=training_callbacks, binary=FLAGS.binary, ind=i)
+            AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,test_data, FLAGS.batch_size, unique_labels, binary=FLAGS.binary, ind=i)
+            AUCs[unique_labels[i]], PR_AUCs[unique_labels[i]], confu_mats[unique_labels[i]] = AUC, PR_AUC, confusion_matrixs
 
+        for u in unique_labels:
+            print(u)
+            print(AUCs[u])
+            print(PR_AUCs[u])
+            print(confu_mats[u])
+            
 
     
 
