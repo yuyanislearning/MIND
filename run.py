@@ -51,12 +51,20 @@ def main(argv):
     test_data = utils.Data(data_prefix + 'test.json', FLAGS)
     val_data = utils.Data(data_prefix+'val.json', FLAGS)
 
+    # setting up
     unique_labels = get_unique_labels(train_data, val_data, test_data)
     class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
-    if FLAGS.short:
+    if FLAGS.short:# only use partial sequence
         train_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
         test_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
         val_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
+    elif FLAGS.graph:# encode data for graph
+        train_data.encode_data_graph( FLAGS.seq_len,  unique_labels, class_weights, is_multilabel=FLAGS.multilabel, \
+            is_binary=FLAGS.binary, spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert', evaluate=False, train_val_test='train')
+        test_data.encode_data_graph( FLAGS.seq_len,  unique_labels, is_multilabel=FLAGS.multilabel, \
+            is_binary=FLAGS.binary,negative_sampling=False,spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert', evaluate=True, train_val_test='test')
+        val_data.encode_data_graph( FLAGS.seq_len,  unique_labels, is_multilabel=FLAGS.multilabel, \
+            is_binary=FLAGS.binary, negative_sampling=False, spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert', evaluate=True, train_val_test='val')
     else:
         train_data.encode_data( FLAGS.seq_len,  unique_labels, class_weights, is_multilabel=FLAGS.multilabel, \
             is_binary=FLAGS.binary, spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert', evaluate=False)
@@ -73,15 +81,14 @@ def main(argv):
     # Build model
     if FLAGS.model=='proteinbert':
         model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, FLAGS.short)
-        model.create_model( train_data,  FLAGS.seq_len,   binary=FLAGS.binary, freeze_pretrained_layers=False)
+        model.create_model( train_data,  FLAGS.seq_len,   binary=FLAGS.binary, freeze_pretrained_layers=False, graph=FLAGS.graph)
     else:
         model = RNN_model(optimizer, loss_object)
         model.create_model(FLAGS.seq_len, 128, unique_labels, FLAGS.binary)
 
     # Optimization settings.
-    if not FLAGS.binary:
+    if not FLAGS.binary:# multi-label
         model.train( train_data, val_data, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, lr = FLAGS.learning_rate, callbacks=training_callbacks)
-
         logging.info('------------------evaluate---------------------' )
 
         model.eval(FLAGS.seq_len,test_data, FLAGS.batch_size, unique_labels)
@@ -90,14 +97,19 @@ def main(argv):
         sort_ind = np.argsort(-np.array([train_data.Y[i].shape[0] for i in range(len(train_data.Y))]))
         AUCs, PR_AUCs, confu_mats = {}, {}, {}
         for i in sort_ind:
+            print('training on '+ unique_labels[i])
             model.train(train_data, val_data, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, lr = FLAGS.learning_rate, callbacks=training_callbacks, binary=FLAGS.binary, ind=i)
             AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,test_data, FLAGS.batch_size, unique_labels, binary=FLAGS.binary, ind=i)
             AUCs[unique_labels[i]], PR_AUCs[unique_labels[i]], confu_mats[unique_labels[i]] = AUC, PR_AUC, confusion_matrixs
 
-        for u in unique_labels:
+        for i in sort_ind:
+            u = unique_labels[i]
             print(u)
-            print(AUCs[u])
-            print(PR_AUCs[u])
+            print('%.3f'%AUCs[u])
+            print('%.3f'%PR_AUCs[u])
+        for i in sort_ind:
+            u = unique_labels[i]
+            print(u)    
             print(confu_mats[u])
             
 
