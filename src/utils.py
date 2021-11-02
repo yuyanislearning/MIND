@@ -15,6 +15,8 @@ try:
 except:
     import json
 from Bio import SeqIO
+from os.path import exists
+
 
 from .tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 
@@ -24,28 +26,36 @@ def handle_flags():
     flags.DEFINE_string("tflog",
             '3', "The setting for TF_CPP_MIN_LOG_LEVEL (default: 3)")
     flags.DEFINE_string('model',
-            'rnn', 'model to use (default: proteinbert)')
+            'proteinbert', 'model to use (default: proteinbert)')
+    flags.DEFINE_string('dataset',
+            'AF', 'dataset to use (default: Alpha fold pdb available ptms)')
     # Data configuration.
     flags.DEFINE_string('config',
             'config.yml', 'configure file (default: config.yml)')
 
     # Model parameters.
     flags.DEFINE_bool("multilabel", True, "multilabel or not (default: True)")
-    flags.DEFINE_bool("binary", False, "Binary or not (default: True)")
+    flags.DEFINE_bool("binary", False, "Binary or not (default: False)")
+    flags.DEFINE_bool("single_binary", False, "Binary or not (default: False)")
     flags.DEFINE_bool("spec_neg_sam", True, "use ptm-specific negative sampling or not (default: True)")
     flags.DEFINE_bool("class_weights", False, "use class weights or not (default: True)")
-    flags.DEFINE_bool("graph", False, "use only partial sequence (default: True)")
+    flags.DEFINE_bool("graph", False, "use only partial sequence (default: False)")
 
 
     # Training parameters.
     flags.DEFINE_integer("seq_len", 512, "maximum lenth+2 of the model sequence (default: 512)")
-    flags.DEFINE_integer("batch_size", 256, "Batch Size (default: 32)")
+    flags.DEFINE_integer("batch_size", 32, "Batch Size (default: 32)")
     flags.DEFINE_integer("num_epochs",
-            20, "Number of training epochs (default: 20)")
+            100, "Number of training epochs (default: 20)")
+    flags.DEFINE_integer("n_lstm", 3, "number of lstm layer for rnn model")
+    flags.DEFINE_integer("n_gcn", 3, "number of gcn layer")
+    flags.DEFINE_integer("fill_cont", 4, "how many sequence should be considered as neighbour/2")
+
+
     flags.DEFINE_integer('random_seed',
             252, 'Random seeds for reproducibility (default: 252)')
     flags.DEFINE_float('learning_rate',
-            1e-4, 'Learning rate while training (default: 1e-3)')
+            1e-3, 'Learning rate while training (default: 1e-3)')
     flags.DEFINE_float('l2_reg',
             1e-3, 'L2 regularization lambda (default: 1e-3)')
     FLAGS = flags.FLAGS
@@ -88,16 +98,15 @@ class Data:
                     'seq': sequence,
                     'label':labels
                 })
-        logging.info('Loaded {} records from {}.'.format(len(self.records),
-            file_name))
+
         self.label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
         'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
-    def encode_data( self, seq_len,  unique_labels, class_weights=None, negative_sampling=False,is_binary=True, is_multilabel=False, spec_neg_sam=True, proteinbert=True, evaluate=False, train_val_test=None, graph=False):
+    def encode_data( self, seq_len,  unique_labels, class_weights=None, is_multilabel=False,  proteinbert=True, evaluate=False, train_val_test=None, dataset=None):
         # only train on the protein with Alpha_fold prot
-        dir = '/workspace/PTM/Data/Musite_data/Structure/AF_pro_'
-        pro_list = []
-        for line in open(dir+train_val_test+'.txt'):
-            pro_list.append(line.strip())
+        # dir = '/workspace/PTM/Data/Musite_data/Structure/AF_pro_'
+        # pro_list = []
+        # for line in open(dir+train_val_test+'.txt'):
+        #     pro_list.append(line.strip())
 
         self.filter_records = [self.records[i] for i, r in enumerate(self.records) if len(r['seq'])<=(seq_len-2)]
         
@@ -106,73 +115,50 @@ class Data:
         data_label = [ d['label'] for d in self.filter_records]
         data_uid = [d['uid'] for d in self.filter_records]
         # filter on the protein with graph
-        data_seq = [data_seq[i] for i in range(len(data_seq)) if data_uid[i] in pro_list]
-        data_label = [data_label[i] for i in range(len(data_label)) if data_uid[i] in pro_list]
-        data_uid = [uid for uid in data_uid if uid in pro_list]
+        # if dataset=='AF':
+        #     data_seq = [data_seq[i] for i in range(len(data_seq)) if data_uid[i] in pro_list]
+        #     data_label = [data_label[i] for i in range(len(data_label)) if data_uid[i] in pro_list]
+        #     data_uid = [uid for uid in data_uid if uid in pro_list]
         self.uid = data_uid
 
-        if is_multilabel:# TODO add binary
-            label_to_index = {str(label): i for i, label in enumerate(unique_labels)}
-            Y = np.zeros((len(data_seq), seq_len, len(unique_labels))) 
-            sample_weights = np.zeros((len(data_seq), seq_len, len(unique_labels)))
+        logging.info('Loaded {} records from {}.'.format(len(data_seq),train_val_test))
+        label_to_index = {str(label): i for i, label in enumerate(unique_labels)}
+        index_to_label = {i: str(label) for i, label in enumerate(unique_labels)}
+        Y = np.zeros((len(data_seq), seq_len, len(unique_labels))) 
+        sample_weights = np.zeros((len(data_seq), seq_len, len(unique_labels)))
 
-            for i, seq in enumerate(data_seq):
-                # pos_ind = []
-                for lbl in data_label[i]:
-                    # for random case that site greater than seq
-                    # if int(lbl['site']) > len(data_seq):
-                    #     continue
-                    Y[i, int(lbl['site'])+1, label_to_index[lbl['ptm_type']]] = 1 # add one since start padding 
-                    sample_weights[i, int(lbl['site'])+1, label_to_index[lbl['ptm_type']]] =1
-                    # pos_ind.append((int(lbl['site']),label_to_index[lbl['ptm_type']]))
-                    # assert np.sum(sample_weights-Y)==0
-                    
-                if evaluate:
-                    for u in unique_labels:
-                        aa = self.label2aa[u]
-                        neg_index = np.array([j for j,amino in enumerate(seq) if amino in aa])
-                        if len(neg_index)<1:
-                            continue
-                        sample_weights[i, neg_index+1, label_to_index[u]] = 1
-                    # for evaluation, get all negative sample
-
-                # elif negative_sampling:
-                #     sam_ind = np.array(choices([i for i in range(len(data_seq))],  k = len(pos_ind)*10)).astype(int)
-                #     lbl_ind = np.array(choices([i for i in range(len(unique_labels))],  k=len(pos_ind)*10)).astype(int)
-                #     count = 0
-                #     for sa, lb in zip(sam_ind, lbl_ind):
-                #         if (sa,lb) in pos_ind:
-                #             continue
-                #         sample_weights[i, sa+1, lb] = 1
-                #         count+=1
-                #         if count >= len(pos_ind):
-                #             break
-                # else:
-                #     sample_weights[i, 1:(1+len(data_seq)), :] = 1
-            Y = Y.reshape((len(data_seq),-1, 1))
-            if class_weights is None:
-                class_weights = np.repeat([1], len(unique_labels))
-            if not evaluate:
-                sample_weights = np.tile(class_weights, (len(data_seq), seq_len, 1)) * sample_weights
-            sample_weights = sample_weights.reshape((len(data_seq), -1, 1))
-            # assert np.sum(sample_weights-Y)==0
+        for i, seq in enumerate(data_seq):
+            # pos_ind = []
+            for lbl in data_label[i]:
+                Y[i, int(lbl['site'])+1, label_to_index[lbl['ptm_type']]] = 1 # add one since start padding 
+                sample_weights[i, int(lbl['site'])+1, label_to_index[lbl['ptm_type']]] =1
+                # pos_ind.append((int(lbl['site']),label_to_index[lbl['ptm_type']]))
+                # assert np.sum(sample_weights-Y)==0
+                
+            if evaluate:
+                for u in unique_labels:
+                    aa = self.label2aa[u]
+                    neg_index = np.array([j for j,amino in enumerate(seq) if amino in aa])
+                    if len(neg_index)<1:
+                        continue
+                    sample_weights[i, neg_index+1, label_to_index[u]] = 1
+                # for evaluation, get all negative sample
+        Y = Y.reshape((len(data_seq),-1,1))
+        if class_weights is None:
+            class_weights = np.repeat([1], len(unique_labels))
+        if not evaluate:
+            sample_weights = np.tile(class_weights, (len(data_seq), seq_len, 1)) * sample_weights
+        sample_weights = sample_weights.reshape((len(data_seq), -1,1))
+        # assert np.sum(sample_weights-Y)==0
 
         self.Y  = Y
         self.sample_weights = sample_weights
-        
+        self.label_to_index = label_to_index
+        self.index_to_label = index_to_label
         
         # Encode X 
-
-        # if graph:
-        #     if not is_binary:
-        #         if proteinbert:
-        #             X = [tokenize_seqs(data_seq, seq_len), np.zeros((len(data_seq), 8943)), adjs]
-        #         else:
-        #             X = [tokenize_seqs(data_seq, seq_len), adjs]
-        # else:
-        if not is_binary:
-            X = [tokenize_seqs(data_seq, seq_len), np.zeros((len(data_seq), 8943))] if proteinbert else \
-                [tokenize_seqs(data_seq, seq_len)]
+        X = [tokenize_seqs(data_seq, seq_len), np.zeros((len(data_seq), 8943))] if proteinbert else \
+            [tokenize_seqs(data_seq, seq_len)]
         self.X = X
         
 
@@ -233,42 +219,43 @@ class Data:
     #     self.sample_weights = all_wei
         # pdb.set_trace()
 
-    # def batch_iter(self, is_random=True):
-    #     if is_random:
-    #         random.shuffle(self.records)
-    #     cur_seq, cur_uid,  cur_lbl = [], [], []
-    #     cur_cnt = 0
-    #     for data in self.records:
-    #         cur_lbl.append([data['label']])
-    #         cur_uid.append(self.pad(data['uid']))
-    #         cur_seq.append(self.pad(data['seq']))
-    #         cur_cnt += 1
-    #         if cur_cnt == self.batch_size:
-    #             yield {
-    #                     'label': np.array(cur_lbl),
-    #                     'seq':cur_seq,
-    #                     'label':cur_lbl}
-    #             cur_cnt = 0
-    #             cur_seq, cur_uid,  cur_lbl = [], [], []
-    #     yield {
-    #             'label': np.array(cur_lbl),
-    #             'seq':cur_seq,
-    #             'label':cur_lbl}
-
-
 
 
 class PTMDataGenerator(tf.keras.utils.Sequence):
-    def __init__(self, dat, seq_len, batch_size=32,  unique_labels=None,graph=False, shuffle=True):
+    def __init__(self, dat, seq_len, batch_size=32,  unique_labels=None,graph=False, shuffle=True, binary=None, ind=None, eval=False, num_cont=None):
         self.batch_size = batch_size
         self.shuffle = shuffle
-        self.dat = dat
-        self.list_id = np.arange(self.dat.Y.shape[0])
+        self.y = dat.Y
+        self.X = dat.X
+        self.sample_weights = dat.sample_weights
+        self.uid = dat.uid
+        self.list_id = np.arange(self.y.shape[0])
         self.unique_labels = unique_labels
         self.seq_len = seq_len
         self.graph = graph
+        self.binary = binary
+        self.ind = ind
+        self.eval = eval
+        self.label2aa = dat.label2aa
+        self.index_to_label = dat.index_to_label
+        self.uid = np.array(self.uid)
+        self.num_cont = num_cont
+        if binary:
+            # remove unused sample
+            self.y = self.y.reshape((self.y.shape[0], self.seq_len, -1))
+            self.y = self.y[:,:,ind]
+            self.sample_weights = self.sample_weights.reshape((self.y.shape[0],self.seq_len, -1))
+            self.sample_weights = self.sample_weights[:,:,ind]
+            yp = np.sum(self.y, axis=1)
+            self.y = self.y[yp>0]
+            self.X = [x[yp>0] for x in self.X]            
+            self.uid = self.uid[yp>0]
+            self.sample_weights = self.sample_weights[yp>0]
+            self.list_id = np.arange(self.y.shape[0])
+        # pdb.set_trace()
+        # print(len(self.list_id))
         self.on_epoch_end()
-
+    
     def __len__(self):
         # number of batch per epoch
         return len(self.index) // self.batch_size
@@ -281,17 +268,28 @@ class PTMDataGenerator(tf.keras.utils.Sequence):
         return (X, y, sample_weights)
 
     def on_epoch_end(self):
-        self.index = np.arange(self.dat.Y.shape[0])
+        self.index = np.arange(self.y.shape[0])
         if self.shuffle == True:
             np.random.shuffle(self.index)
 
     def __get_data(self, batch):
-        # batch = np.array(batch)
-        X = [x[batch] for x in self.dat.X]  # get batch for all component of X
-        y = self.dat.Y[batch] 
-        uid = np.array(self.dat.uid)
-        uid = uid[batch]
-        sample_weights = self.dat.sample_weights[batch]
+        X = [x[batch] for x in self.X]  # get batch for all component of X
+        y = self.y[batch]
+        uid = self.uid[batch]
+        sample_weights = self.sample_weights[batch]
+        if self.eval:
+            if self.graph:
+                adjs = get_graph(uid, X, self.num_cont ,self.seq_len)
+                adjs = np.array(adjs)
+                X.append(adjs)
+            if self.binary:
+                y = np.expand_dims(y,-1)
+                sample_weights = np.expand_dims(sample_weights,-1)
+                assert len(y.shape)==3
+                assert len(sample_weights.shape)==3
+                return (X, y, sample_weights)
+            else:
+                return (X, y, sample_weights)
         # change shape to (batch, seq_len, labels)
         y = y.reshape((len(batch), self.seq_len, -1))
         sample_weights = sample_weights.reshape((len(batch), self.seq_len, -1))
@@ -300,55 +298,101 @@ class PTMDataGenerator(tf.keras.utils.Sequence):
 
         # To randomly assign negative sample everytime
         for i in range(y.shape[0]):
-            for u in self.unique_labels:
-                aa = self.dat.label2aa[u]
+            if self.binary:
+                assert len(y.shape)==3
+                assert len(sample_weights.shape)==3
+                # get all aa
+                aa = self.label2aa[self.index_to_label[self.ind]]
                 seq = [index_to_token[j] for j in X[0][i]]  
                 all_neg_index = np.array([j for j,amino in enumerate(seq) if amino in aa], dtype=int)
                 # remove positive labels
-                pos_index = set(np.array([j for j in range(y.shape[1]) if y[i,j, label_to_index[u]]==1], dtype = int))
+                pos_index = set(np.array([j for j in range(y.shape[1]) if y[i,j, 0]==1], dtype = int))
                 all_neg_index = set(all_neg_index) - pos_index
                 all_neg_index = np.array([j for j in all_neg_index])
-                n_pos = int(np.sum(sample_weights[i,:,label_to_index[u]]))
+                n_pos = int(np.sum(sample_weights[i,:,0]))
                 if len(all_neg_index)<1 or n_pos==0:
                     continue
-                #pdb.set_trace()
                 if n_pos <= len(all_neg_index):#if more pos than neg
-                    neg_index = np.array(random.sample(set(all_neg_index), k=1), dtype=int)#n_pos TODO
+                    neg_index = np.array(random.sample(set(all_neg_index), k=n_pos), dtype=int)#n_pos TODO
                 else:
-                    neg_index = all_neg_index[0]
-                sample_weights[i, neg_index, label_to_index[u]] = 1
+                    neg_index = all_neg_index#[0]
+                sample_weights[i, neg_index, 0] = 1
+                
                 # testing TODO: remove
-                if n_pos <= len(all_neg_index):
-                    pos_y = np.sum(y[i,:, label_to_index[u]][sample_weights[i, :, label_to_index[u]]==1] ==1)
-                    neg_y = np.sum(y[i,:, label_to_index[u]][sample_weights[i, :, label_to_index[u]]==1] ==0)
-                    # print(pos_y, neg_y)
-                    #assert pos_y == neg_y
-
+                # if n_pos <= len(all_neg_index):
+                #     pos_y = np.sum(y[i,:, label_to_index[u]][sample_weights[i, :, label_to_index[u]]==1] ==1)
+                #     neg_y = np.sum(y[i,:, label_to_index[u]][sample_weights[i, :, label_to_index[u]]==1] ==0)
+                #     # print(pos_y, neg_y)
+                #     #assert pos_y == neg_y
+            else:    
+                for u in self.unique_labels:
+                    aa = self.label2aa[u]
+                    seq = [index_to_token[j] for j in X[0][i]]  
+                    all_neg_index = np.array([j for j,amino in enumerate(seq) if amino in aa], dtype=int)
+                    # remove positive labels
+                    pos_index = set(np.array([j for j in range(y.shape[1]) if y[i,j, label_to_index[u]]==1], dtype = int))
+                    all_neg_index = set(all_neg_index) - pos_index
+                    all_neg_index = np.array([j for j in all_neg_index])
+                    n_pos = int(np.sum(sample_weights[i,:,label_to_index[u]]))
+                    if len(all_neg_index)<1 or n_pos==0:
+                        continue
+                    #pdb.set_trace()
+                    if n_pos <= len(all_neg_index):#if more pos than neg
+                        neg_index = np.array(random.sample(set(all_neg_index), k=n_pos), dtype=int)#n_pos TODO
+                    else:
+                        neg_index = all_neg_index#[0]
+                    sample_weights[i, neg_index, label_to_index[u]] = 1
+                    # testing TODO: remove
+                    # if n_pos <= len(all_neg_index):
+                    #     pos_y = np.sum(y[i,:, label_to_index[u]][sample_weights[i, :, label_to_index[u]]==1] ==1)
+                    #     neg_y = np.sum(y[i,:, label_to_index[u]][sample_weights[i, :, label_to_index[u]]==1] ==0)
+                        # print(pos_y, neg_y)
+                        #assert pos_y == neg_y
 
         y = y.reshape((len(batch),-1, 1))
         sample_weights = sample_weights.reshape((len(batch), -1, 1))# == 1
         
         # add graph
         if self.graph:
-            adjs = get_graph(uid, self.seq_len)
+            adjs = get_graph(uid,X, self.num_cont,self.seq_len)
             adjs = np.array(adjs)
             X.append(adjs)
         return (X, y, sample_weights)
 
 
-def get_graph(uid, seq_len):
+def get_graph(uid,X, num_cont,seq_len):
     adjs = []
     for i in range(len(uid)):
         # get adj
         adj_dir = '/workspace/PTM/Data/Musite_data/Structure/pdb/AF_cont_map/'
-        adj = np.load(adj_dir+uid[i]+'.cont_map.npy')
-        n = adj.shape[0]
-        # pad adj with [0] as 0 for start 
         pad_adj = np.zeros((seq_len, seq_len))
-        pad_adj[1:(1+n),1:(1+n)] = adj
+        if exists(adj_dir+uid[i]+'.cont_map.npy'):
+            adj = np.load(adj_dir+uid[i]+'.cont_map.npy')
+            adj = assign_neighbour(adj, num_cont)
+            n = adj.shape[0]
+            # pad adj with [0] as 0 for start 
+            pad_adj[1:(1+n),1:(1+n)] = adj
+        else:
+            # 24 is the stop sign
+            n = np.where(X[0][i]==24)[0][0]-1
+            adj = np.zeros((n,n))
+            adj = assign_neighbour(adj, num_cont)
+            pad_adj[1:(1+n),1:(1+n)] = adj
         adjs.append(pad_adj)
     adjs = np.array(adjs)
     return adjs
+
+def assign_neighbour(adj, num_cont):
+    # assign the 2*num_cont neighbours to adj 
+    n= adj.shape[0]
+    if num_cont>=n:
+        return np.ones((n,n), dtype=int)
+    adj = adj + np.identity(n, dtype=int)
+    for i in range(1,num_cont):
+        adj[i:n,0:(n-i)] = adj[i:n,0:(n-i)] + np.identity(n-i, dtype=int)
+        adj[0:(n-i),i:n] = adj[0:(n-i),i:n] + np.identity(n-i, dtype=int)
+    adj[adj>0] = 1
+    return adj
 
 
 def get_unique_labels(train_set, valid_set, test_set):
