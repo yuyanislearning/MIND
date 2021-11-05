@@ -27,7 +27,7 @@ import yaml
 
 from src.utils import get_class_weights, get_unique_labels, Data, handle_flags, limit_gpu_memory_growth, PTMDataGenerator,CategoricalTruePositives
 from src import utils
-from src.model import GAT_model, ProteinBert, RNN_model
+from src.model import GAT_model, ProteinBert, RNN_model, TransFormer
 
 handle_flags()
 
@@ -109,7 +109,15 @@ def main(argv):
         else:
             model = GAT_model(optimizer, loss_object, FLAGS.learning_rate)
             model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6, FLAGS.binary, n_gcn=FLAGS.n_gcn)
-    # Optimization settings.
+    elif FLAGS.model=='Transformer':
+        if FLAGS.binary and FLAGS.multilabel:
+            model = TransFormer(optimizer, loss_object, FLAGS.learning_rate, d_model=128, num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512,\
+                rate=0.1,binary=False, unique_labels=unique_labels)
+            model.create_model(FLAGS.seq_len, graph=FLAGS.graph)
+        else:
+            model = TransFormer(optimizer, loss_object, FLAGS.learning_rate, d_model=128, num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512,\
+                rate=0.1,binary=FLAGS.binary, unique_labels=unique_labels)
+            model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
     if FLAGS.multilabel:# multi-label      
         now = datetime.now()
         current_time = now.strftime("%H:%M:%S")
@@ -146,12 +154,19 @@ def main(argv):
                 b_model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, False)
                 b_model.create_model( train_data,  FLAGS.seq_len, \
                     freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn) 
-            else:
+            elif FLAGS.model=='RNN':
                 b_model = RNN_model(optimizer, loss_object, FLAGS.learning_rate)
                 b_model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6,metrics, FLAGS.binary, \
                     False, FLAGS.graph, n_lstm=FLAGS.n_lstm, n_gcn=FLAGS.n_gcn)
+            elif FLAGS.model=='GAT':
+                model = GAT_model(optimizer, loss_object, FLAGS.learning_rate)
+                model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6, FLAGS.binary, n_gcn=FLAGS.n_gcn)
+            elif FLAGS.model=='Transformer':
+                model = TransFormer(optimizer, loss_object, FLAGS.learning_rate, d_model=128, num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512,\
+                rate=0.1,binary=FLAGS.binary, unique_labels=unique_labels)
+            model.create_model(FLAGS.seq_len, graph=FLAGS.graph) 
             for layer in model.model.layers:
-                if layer.name not in ['dense', 'reshape',]:
+                if layer.name not in ['my_last_dense', 'reshape',]:
                     b_model.model.get_layer(name=layer.name).set_weights(layer.get_weights())
             if not FLAGS.single_binary:
                 model=b_model # TODO comment it
@@ -171,7 +186,7 @@ def main(argv):
             training_callbacks = [
                 #keras.callbacks.ReduceLROnPlateau(patience = 1, factor = 0.25, min_lr = 1e-05, verbose = 1),
                 keras.callbacks.EarlyStopping(monitor='loss',patience = 2, restore_best_weights = True),
-                #cp_callback TODO add it back
+                cp_callback 
             ] 
             if FLAGS.multilabel and FLAGS.single_binary:
                 model=b_model

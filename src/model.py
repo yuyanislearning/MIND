@@ -29,6 +29,7 @@ import sys
 import importlib.util
 
 from src.utils import PTMDataGenerator, get_graph
+from src.transformer import Transformer, Encoder, positional_encoding, EncoderLayer, create_padding_mask
 
 sys.path.append("/workspace/PTM/protein_bert/")
 sys.path.append('/workspace/PTM/transformers/src/')
@@ -146,7 +147,7 @@ class RNN_model(Raw_model):
             for i in range(n_gcn-1):
                 last_hidden_layer = GATConv(channels=128, name = 'gcn-'+str(i+2) )([last_hidden_layer, adj_input])
                 last_hidden_layer = keras.layers.Dropout(dropout, name='dropout-'+str(i+2))(last_hidden_layer)
-        out = layers.Dense(1, activation = 'sigmoid', name = 'dense')(last_hidden_layer) if is_binary else layers.Dense(len(unique_labels), activation = 'sigmoid', name='dense')(last_hidden_layer)
+        out = layers.Dense(1, activation = 'sigmoid', name = 'my_last_dense')(last_hidden_layer) if is_binary else layers.Dense(len(unique_labels), activation = 'sigmoid', name='my_last_dense')(last_hidden_layer)
 
         if not is_binary: 
             out = layers.Reshape((-1,1), name ='reshape')(out)
@@ -181,7 +182,7 @@ class GAT_model(Raw_model):
 
         for i in range(3):#TODO
             last_hidden_layer = layers.Bidirectional(layers.LSTM(d_hidden_seq,  return_sequences=True),  name='lstm-'+str(i+1))(last_hidden_layer)
-        out = layers.Dense(1, activation = 'sigmoid', name = 'dense')(last_hidden_layer) if is_binary else layers.Dense(len(unique_labels), activation = 'sigmoid', name='dense')(last_hidden_layer)
+        out = layers.Dense(1, activation = 'sigmoid', name = 'my_last_dense')(last_hidden_layer) if is_binary else layers.Dense(len(unique_labels), activation = 'sigmoid', name='my_last_dense')(last_hidden_layer)
 
         if not is_binary: 
             out = layers.Reshape((-1,1), name ='reshape')(out)
@@ -219,12 +220,97 @@ class ProteinBert(Raw_model):
         self.model = self.model_generator.create_model(seq_len,  freeze_pretrained_layers = freeze_pretrained_layers, graph = graph, n_gcn=n_gcn)
 
 
+class TransFormer(Raw_model):
+    def __init__(self, optimizer_class, loss_object, lr, d_model, num_layers, seq_len, num_heads, dff, rate, binary, unique_labels):
+        Raw_model.__init__(self, optimizer_class, loss_object, lr )
+        
+        self.d_model = d_model
+        self.num_layers = num_layers
+
+        self.embedding = tf.keras.layers.Embedding(n_tokens, d_model)
+        self.pos_encoding = positional_encoding(seq_len,
+                                                self.d_model)
+
+        self.enc_layers = [EncoderLayer(d_model, num_heads, dff, rate)
+                        for _ in range(num_layers)]
+
+        self.dropout = tf.keras.layers.Dropout(rate)
+        self.binary = binary
+        self.unique_labels = unique_labels
+
+    def create_model(self, seq_len, graph=False):
+        input_seq = keras.layers.Input(shape = (seq_len,), dtype = np.int32, name = 'input-seq')
+        if graph:
+            adj_input = keras.layers.Input(shape=(seq_len, seq_len), name = 'input-adj')
+        #seq_len = tf.shape(x)[1]
+        attention_weights = {}
+
+        mask = create_padding_mask(input_seq)
+        # adding embedding and position encoding.
+        x = self.embedding(input_seq)  # (batch_size, input_seq_len, d_model)
+        x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
+        x += self.pos_encoding[:, :seq_len, :]
+
+        x = self.dropout(x)#, training=training
+
+        for i in range(self.num_layers):
+            x, block1 = self.enc_layers[i](x, mask, adj_input) if graph else self.enc_layers[i](x, mask)#, training
+            attention_weights[f'encoder_layer{i+1}_block1'] = block1
+
+        out = layers.Dense(1, activation = 'sigmoid', name = 'my_last_dense')(x) if self.binary else layers.Dense(len(self.unique_labels), activation = 'sigmoid', name='dense')(x)
+        if not self.binary: 
+            out = layers.Reshape((-1,1), name ='reshape')(out)
+
+        # return out, attention_weights  # (batch_size, input_seq_len, d_model)
+
+        # transformer = Encoder(is_binary,unique_labels,  num_layers, d_model, num_heads, dff, n_tokens,seq_len, rate=dropout_rate)
+        # out, attention_weights = transformer(input_seq)
+        # model = Transformer(is_binary,unique_labels,num_layers, d_model, num_heads, dff, n_tokens , seq_len, dropout_rate, inputs = input_seq )
+        # enc_output, attention_weights = model.output
+        # out = layers.Dense(1, activation = 'sigmoid', name = 'dense')(enc_output) if is_binary else layers.Dense(len(unique_labels), activation = 'sigmoid', name='dense')(enc_output)
+
+        # if not is_binary: 
+        #     out = layers.Reshape((-1,1), name ='reshape')(out)
+        # model_input = model.input
+        model = keras.models.Model(inputs = [input_seq, adj_input] , outputs = out)
+        loss = keras.losses.BinaryCrossentropy(from_logits=False, reduction=losses_utils.ReductionV2.NONE)
+
+        #model.build(input_seq)
+        self.model = model
+        print(model.summary())
+        # learning_rate = CustomSchedule(d_model) TODO
+        # optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98,
+        #                              epsilon=1e-9)
+        self.model.compile(
+            loss = loss,
+            optimizer = self.optimizer,
+            #run_eagerly=True,
+        )
+
+
+
+
 class ProtTrans(Raw_model):
     def __init__(self, optimizer_class, loss_object, unique_labels,lr,  binary=None, short=None):
         Raw_model.__init__(self, optimizer_class, loss_object, lr )
 
 
 
+class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, d_model, warmup_steps=4000):
+        super(CustomSchedule, self).__init__()
+
+        self.d_model = d_model
+        self.d_model = tf.cast(self.d_model, tf.float32)
+
+        self.warmup_steps = warmup_steps
+
+    def __call__(self, step):
+        arg1 = tf.math.rsqrt(step)
+        arg2 = step * (self.warmup_steps ** -1.5)
+
+        return tf.math.rsqrt(self.d_model) * tf.math.minimum(arg1, arg2)
+        
 def tokenize_seqs(seqs, seq_len):
     # Note that tokenize_seq already adds <START> and <END> tokens.
     return np.array([seq_tokens + (seq_len - len(seq_tokens)) * [additional_token_to_index['<PAD>']] for seq_tokens in map(tokenize_seq, seqs)], dtype = np.int32)
