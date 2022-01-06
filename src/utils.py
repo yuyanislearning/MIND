@@ -34,6 +34,10 @@ def handle_flags():
     # Data configuration.
     flags.DEFINE_string('config',
             'config.yml', 'configure file (default: config.yml)')
+    flags.DEFINE_string('data_path',
+            '../Data/Musite_data/ptm', 'path to data dir')
+    flags.DEFINE_string('res_path',
+            'res', 'path to result dir')
 
     # Model parameters.
     flags.DEFINE_bool("multilabel", True, "multilabel or not (default: True)")

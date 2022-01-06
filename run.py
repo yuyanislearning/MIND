@@ -45,17 +45,14 @@ def main(argv):
     #tf.config.run_functions_eagerly(True)#TODO remove
 
     # Load data
-    cfg = yaml.load(open(FLAGS.config, 'r'), Loader=yaml.BaseLoader) #TODO
+    # cfg = yaml.load(open(FLAGS.config, 'r'), Loader=yaml.BaseLoader) #TODO
     if FLAGS.dataset=='AF':
         data_prefix = '{}/AF_PTM_'.format(
-            cfg['path_data']) 
-        path_pred  = '{}/AF_PTM_'.format(
-            cfg['path_pred']) 
+            FLAGS.data_path) 
     else:
         data_prefix = '{}/PTM_'.format(
-                cfg['path_data']) 
-        path_pred  = '{}/PTM_'.format(
-                cfg['path_pred']) 
+                FLAGS.data_path) 
+
 
     train_dat_aug = PTMDataGenerator(data_prefix+'train.json', FLAGS, shuffle=True,ind=None, eval=False)
     unique_labels = train_dat_aug.unique_labels
@@ -66,7 +63,7 @@ def main(argv):
 
     # setting up
 
-    class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
+    # class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
 
     optimizer = tf.keras.optimizers.Adam(
             learning_rate=FLAGS.learning_rate, amsgrad=True)
