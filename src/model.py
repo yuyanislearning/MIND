@@ -21,20 +21,20 @@ from spektral.layers import GCNConv, GlobalSumPool, GATConv
 
 from sklearn.metrics import f1_score, precision_recall_curve, auc, roc_auc_score, accuracy_score, confusion_matrix, average_precision_score
 from .tokenization import  n_tokens
-from .MyModel import MyModel
+# from .MyModel import MyModel
 
-import pprint
+# import pprint
 import pdb
 import sys
-import importlib.util
+# import importlib.util
 
-from src.utils import PTMDataGenerator, get_graph
+# from src.utils import PTMDataGenerator, get_graph
 from src.transformer import Transformer, Encoder, positional_encoding, EncoderLayer, create_padding_mask
 
 sys.path.append("/workspace/PTM/protein_bert/")
 sys.path.append('/workspace/PTM/transformers/src/')
-from proteinbert import OutputType, OutputSpec, FinetuningModelGenerator, load_pretrained_model, finetune, evaluate_by_len
-from proteinbert.conv_and_global_attention_model import get_model_with_hidden_layers_as_outputs
+# from proteinbert import OutputType, OutputSpec, FinetuningModelGenerator, load_pretrained_model, finetune, evaluate_by_len
+# from proteinbert.conv_and_global_attention_model import get_model_with_hidden_layers_as_outputs
 from spektral.layers import GCNConv, GlobalSumPool
 
 from tensorflow.python.eager import monitoring
@@ -213,25 +213,25 @@ class GAT_model(Raw_model):
         )
 
 
-class ProteinBert(Raw_model):
-    def __init__(self, optimizer_class, loss_object, unique_labels,lr,  binary=None, multilabel=None):
-        Raw_model.__init__(self, optimizer_class, loss_object, lr )
-        pretraining_model_generator, _ = load_pretrained_model(local_model_dump_dir='/workspace/PTM/protein_bert/proteinbert',local_model_dump_file_name='epoch_92400_sample_23500000.pkl',\
-            lr = self.lr)
-        # if short:
-        #     output_spec = OutputSpec(OutputType(False, 'binary'), [0,1]) if binary else OutputSpec(OutputType(False, 'multilabel'), unique_labels)
-        if multilabel:
-            output_spec = OutputSpec(OutputType(True, 'multilabel'), unique_labels)
-        if binary:
-            output_spec = OutputSpec(OutputType(True, 'binary'), [0,1])
-        uni_l = [0,1] if binary else unique_labels
-        self.model_generator = FinetuningModelGenerator(pretraining_model_generator, output_spec, pretraining_model_manipulation_function = \
-                get_model_with_hidden_layers_as_outputs, dropout_rate = 0.5, unique_labels = uni_l)
-    def create_model(self, train_data,  seq_len,freeze_pretrained_layers=None,binary=None, graph=False, n_gcn=None):   
-        train_X, train_Y, _ = (train_data.X[0], train_data.Y[0], train_data.sample_weights[0]) if binary \
-            else (train_data.X, train_data.Y, train_data.sample_weights)
-        self.model_generator.dummy_epoch = (_slice_arrays(train_X, slice(0, 1)), _slice_arrays(train_Y, slice(0, 1)))
-        self.model = self.model_generator.create_model(seq_len,  freeze_pretrained_layers = freeze_pretrained_layers, graph = graph, n_gcn=n_gcn)
+# class ProteinBert(Raw_model):
+#     def __init__(self, optimizer_class, loss_object, unique_labels,lr,  binary=None, multilabel=None):
+#         Raw_model.__init__(self, optimizer_class, loss_object, lr )
+#         pretraining_model_generator, _ = load_pretrained_model(local_model_dump_dir='/workspace/PTM/protein_bert/proteinbert',local_model_dump_file_name='epoch_92400_sample_23500000.pkl',\
+#             lr = self.lr)
+#         # if short:
+#         #     output_spec = OutputSpec(OutputType(False, 'binary'), [0,1]) if binary else OutputSpec(OutputType(False, 'multilabel'), unique_labels)
+#         if multilabel:
+#             output_spec = OutputSpec(OutputType(True, 'multilabel'), unique_labels)
+#         if binary:
+#             output_spec = OutputSpec(OutputType(True, 'binary'), [0,1])
+#         uni_l = [0,1] if binary else unique_labels
+#         self.model_generator = FinetuningModelGenerator(pretraining_model_generator, output_spec, pretraining_model_manipulation_function = \
+#                 get_model_with_hidden_layers_as_outputs, dropout_rate = 0.5, unique_labels = uni_l)
+#     def create_model(self, train_data,  seq_len,freeze_pretrained_layers=None,binary=None, graph=False, n_gcn=None):   
+#         train_X, train_Y, _ = (train_data.X[0], train_data.Y[0], train_data.sample_weights[0]) if binary \
+#             else (train_data.X, train_data.Y, train_data.sample_weights)
+#         self.model_generator.dummy_epoch = (_slice_arrays(train_X, slice(0, 1)), _slice_arrays(train_Y, slice(0, 1)))
+#         self.model = self.model_generator.create_model(seq_len,  freeze_pretrained_layers = freeze_pretrained_layers, graph = graph, n_gcn=n_gcn)
 
 
 class TransFormer(Raw_model):

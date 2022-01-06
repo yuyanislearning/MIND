@@ -27,7 +27,7 @@ import yaml
 
 from src.utils import get_class_weights,  handle_flags, limit_gpu_memory_growth, PTMDataGenerator
 from src import utils
-from src.model import GAT_model, ProteinBert, RNN_model, TransFormer
+from src.model import GAT_model,  RNN_model, TransFormer
 
 
 handle_flags()
@@ -74,15 +74,16 @@ def main(argv):
     metrics = []
     # Build model
     if FLAGS.model=='proteinbert':
-        if FLAGS.binary and FLAGS.multilabel:
-            # for first trained on multilabel then binary
-            model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,False, FLAGS.multilabel)
-            model.create_model( train_data,  FLAGS.seq_len, \
-                freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn)
-        else:
-            model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, FLAGS.multilabel)
-            model.create_model( train_data,  FLAGS.seq_len, \
-                freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn)            
+        next
+        # if FLAGS.binary and FLAGS.multilabel:
+        #     # for first trained on multilabel then binary
+        #     model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,False, FLAGS.multilabel)
+        #     model.create_model( train_data,  FLAGS.seq_len, \
+        #         freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn)
+        # else:
+        #     model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, FLAGS.multilabel)
+        #     model.create_model( train_data,  FLAGS.seq_len, \
+        #         freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn)            
     elif FLAGS.model=='RNN':
         if FLAGS.binary and FLAGS.multilabel:
             model = RNN_model(optimizer, loss_object, FLAGS.learning_rate)
@@ -136,9 +137,10 @@ def main(argv):
     if FLAGS.binary:# multi-label
         # initiate binary with weight from multilabel
         if FLAGS.model=='proteinbert':
-            b_model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, False)
-            b_model.create_model( train_data,  FLAGS.seq_len, \
-                freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn) 
+            next
+            # b_model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, False)
+            # b_model.create_model( train_data,  FLAGS.seq_len, \
+            #     freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn) 
         elif FLAGS.model=='RNN':
             b_model = RNN_model(optimizer, loss_object, FLAGS.learning_rate)
             b_model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6,metrics, FLAGS.binary, \
