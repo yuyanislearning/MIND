@@ -1,0 +1,2 @@
+local total: 29270870.000000
+global total: 65531886.000000

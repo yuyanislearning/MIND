@@ -1,1 +1,1 @@
-from .utils import Data
+from .utils import PTMDataGenerator

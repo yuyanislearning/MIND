@@ -25,9 +25,10 @@ from sklearn.metrics import recall_score
 from tqdm import tqdm
 import yaml
 
-from src.utils import get_class_weights, get_unique_labels, Data, handle_flags, limit_gpu_memory_growth, PTMDataGenerator,CategoricalTruePositives
+from src.utils import get_class_weights,  handle_flags, limit_gpu_memory_growth, PTMDataGenerator
 from src import utils
 from src.model import GAT_model, ProteinBert, RNN_model, TransFormer
+
 
 handle_flags()
 
@@ -56,24 +57,16 @@ def main(argv):
         path_pred  = '{}/PTM_'.format(
                 cfg['path_pred']) 
 
-    train_data = utils.Data(data_prefix + 'train.json', FLAGS)
-    test_data = utils.Data(data_prefix + 'test.json', FLAGS)
-    val_data = utils.Data(data_prefix+'val.json', FLAGS)
+    train_dat_aug = PTMDataGenerator(data_prefix+'train.json', FLAGS, shuffle=True,ind=None, eval=False)
+    unique_labels = train_dat_aug.unique_labels
+    val_dat_aug = PTMDataGenerator(data_prefix+'val.json', FLAGS, shuffle=True,ind=None, eval=True)
+    test_dat_aug = PTMDataGenerator(data_prefix+'test.json', FLAGS, shuffle=True,ind=None, eval=True)
+    val_dat_aug.update_unique_labels(unique_labels)
+    test_dat_aug.update_unique_labels(unique_labels)
 
     # setting up
-    unique_labels = get_unique_labels(train_data, val_data, test_data)
 
     class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
-    # if FLAGS.short:# only use partial sequence
-    #     train_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
-    #     test_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
-    #     val_data.encode_data_short( FLAGS.seq_len,  unique_labels, is_binary=FLAGS.binary,  spec_neg_sam=FLAGS.spec_neg_sam, proteinbert=FLAGS.model=='proteinbert')
-    train_data.encode_data( FLAGS.seq_len,  unique_labels, class_weights, is_multilabel=FLAGS.multilabel, \
-        proteinbert=FLAGS.model=='proteinbert', evaluate=False, train_val_test='train', dataset=FLAGS.dataset)
-    test_data.encode_data( FLAGS.seq_len,  unique_labels, is_multilabel=FLAGS.multilabel, \
-        proteinbert=FLAGS.model=='proteinbert', evaluate=True, train_val_test='test', dataset=FLAGS.dataset)
-    val_data.encode_data( FLAGS.seq_len,  unique_labels, is_multilabel=FLAGS.multilabel,  \
-         proteinbert=FLAGS.model=='proteinbert', evaluate=True, train_val_test='val', dataset=FLAGS.dataset)
 
     optimizer = tf.keras.optimizers.Adam(
             learning_rate=FLAGS.learning_rate, amsgrad=True)
@@ -110,14 +103,9 @@ def main(argv):
             model = GAT_model(optimizer, loss_object, FLAGS.learning_rate)
             model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6, FLAGS.binary, n_gcn=FLAGS.n_gcn)
     elif FLAGS.model=='Transformer':
-        if FLAGS.binary and FLAGS.multilabel:
-            model = TransFormer(optimizer, loss_object, FLAGS.learning_rate, d_model=128, num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512,\
-                rate=0.1,binary=False, unique_labels=unique_labels)
-            model.create_model(FLAGS.seq_len, graph=FLAGS.graph)
-        else:
-            model = TransFormer(optimizer, loss_object, FLAGS.learning_rate, d_model=128, num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512,\
-                rate=0.1,binary=FLAGS.binary, unique_labels=unique_labels)
-            model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
+        model = TransFormer(FLAGS.model,optimizer, loss_object, FLAGS.learning_rate, d_model=128, num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512,\
+            rate=0.1,binary=False, unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
     if FLAGS.multilabel:# multi-label      
         now = datetime.now()
         current_time = now.strftime("%H:%M:%S")
@@ -130,10 +118,10 @@ def main(argv):
             keras.callbacks.EarlyStopping(monitor='loss',patience = 2, restore_best_weights = True),
             cp_callback
         ] 
-        model.train( train_data, val_data, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels, lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
+        model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels, lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
         logging.info('------------------evaluate---------------------' )
         model.model = tf.keras.models.load_model(checkpoint_path)
-        AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,test_data, FLAGS.batch_size, unique_labels, FLAGS.graph, num_cont=FLAGS.fill_cont)
+        AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,test_dat_aug, FLAGS.batch_size, unique_labels, FLAGS.graph, num_cont=FLAGS.fill_cont)
         for u in unique_labels:
             print('%.3f'%PR_AUC[u])
         for u in unique_labels:
@@ -141,44 +129,53 @@ def main(argv):
             print(confusion_matrixs[u])
         if not FLAGS.binary:
             if FLAGS.graph:
-                model_name = './saved_model/'+FLAGS.model+'_'+FLAGS.dataset+'_multi_graph_'+str(FLAGS.seq_len) +'_'+str(FLAGS.fill_cont)
+                model_name = './saved_model/'+FLAGS.model+'/'+FLAGS.model+'_'+'_multi_graph_'+str(FLAGS.seq_len) +\
+                    '_'+str(FLAGS.fill_cont) + 'no_pdb' + str(FLAGS.no_pdb)
             else:
-                model_name = './saved_model/'+FLAGS.model+'_'+FLAGS.dataset+'_multi_'+str(FLAGS.seq_len)
+                model_name = './saved_model/'+FLAGS.model+'/'+FLAGS.model+'_'+'_multi_'+str(FLAGS.seq_len)
             model.model.save(model_name)
         os.system('rm -r '+checkpoint_path)
 
     if FLAGS.binary:# multi-label
-        if FLAGS.multilabel:
-            # initiate binary with weight from multilabel
-            if FLAGS.model=='proteinbert':
-                b_model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, False)
-                b_model.create_model( train_data,  FLAGS.seq_len, \
-                    freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn) 
-            elif FLAGS.model=='RNN':
-                b_model = RNN_model(optimizer, loss_object, FLAGS.learning_rate)
-                b_model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6,metrics, FLAGS.binary, \
-                    False, FLAGS.graph, n_lstm=FLAGS.n_lstm, n_gcn=FLAGS.n_gcn)
-            elif FLAGS.model=='GAT':
-                model = GAT_model(optimizer, loss_object, FLAGS.learning_rate)
-                model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6, FLAGS.binary, n_gcn=FLAGS.n_gcn)
-            elif FLAGS.model=='Transformer':
-                model = TransFormer(optimizer, loss_object, FLAGS.learning_rate, d_model=128, num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512,\
-                rate=0.1,binary=FLAGS.binary, unique_labels=unique_labels)
-            model.create_model(FLAGS.seq_len, graph=FLAGS.graph) 
-            for layer in model.model.layers:
-                if layer.name not in ['my_last_dense', 'reshape',]:
-                    b_model.model.get_layer(name=layer.name).set_weights(layer.get_weights())
-            if not FLAGS.single_binary:
-                model=b_model # TODO comment it
+        # initiate binary with weight from multilabel
+        if FLAGS.model=='proteinbert':
+            b_model = ProteinBert(optimizer, loss_object, unique_labels, FLAGS.learning_rate,FLAGS.binary, False)
+            b_model.create_model( train_data,  FLAGS.seq_len, \
+                freeze_pretrained_layers=False, binary=FLAGS.binary, graph=FLAGS.graph, n_gcn=FLAGS.n_gcn) 
+        elif FLAGS.model=='RNN':
+            b_model = RNN_model(optimizer, loss_object, FLAGS.learning_rate)
+            b_model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6,metrics, FLAGS.binary, \
+                False, FLAGS.graph, n_lstm=FLAGS.n_lstm, n_gcn=FLAGS.n_gcn)
+        elif FLAGS.model=='GAT':
+            b_model = GAT_model(optimizer, loss_object, FLAGS.learning_rate)
+            b_model.create_model(FLAGS.seq_len, 128, unique_labels, 0.6, FLAGS.binary, n_gcn=FLAGS.n_gcn)
+        elif FLAGS.model=='Transformer':
+            b_model = TransFormer(FLAGS.model, optimizer, loss_object, FLAGS.learning_rate, d_model=128, num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512,\
+            rate=0.1,binary=FLAGS.binary, unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+            b_model.create_model(FLAGS.seq_len, graph=FLAGS.graph) 
+        #for layer in model.model.layers:
+        for li in range(len(model.model.layers)):
+            layer = model.model.layers[li]  
+            if layer.name not in ['my_last_dense', 'reshape',]:
+                b_model.model.get_layer(index=li).set_weights(layer.get_weights())
 
-        temp_y = train_data.Y.reshape((train_data.Y.shape[0], FLAGS.seq_len, -1))
-        sort_ind = np.argsort(-np.array([np.sum(temp_y[:,:,i]) for i in range(len(unique_labels))]))
+
+        # temp_y = train_data.Y.reshape((train_data.Y.shape[0], FLAGS.seq_len, -1))
+        # sort_ind = np.argsort(-np.array([np.sum(temp_y[:,:,i]) for i in range(len(unique_labels))]))
         AUCs, PR_AUCs, confu_mats = {}, {}, {}
         now = datetime.now()
         current_time = now.strftime("%H:%M:%S")
         checkpoint_path = './saved_model/'+current_time
         os.system('mkdir '+ checkpoint_path)
-        for i in sort_ind:
+        # now binary only coupled with multiclass
+
+        for i in range(len(unique_labels)):
+            train_dat_aug = PTMDataGenerator(data_prefix+'train.json', FLAGS, shuffle=True,ind=i, eval=False, binary=True)
+            unique_labels = train_dat_aug.unique_labels
+            val_dat_aug = PTMDataGenerator(data_prefix+'val.json', FLAGS, shuffle=True,ind=i, eval=True, binary=True)
+            test_dat_aug = PTMDataGenerator(data_prefix+'test.json', FLAGS, shuffle=True,ind=i, eval=True, binary=True)
+            val_dat_aug.update_unique_labels(unique_labels)
+            test_dat_aug.update_unique_labels(unique_labels)
             print('training on '+ unique_labels[i])
             # make checkpoint for each predictor
             os.system('mkdir '+ checkpoint_path+'/'+unique_labels[i])
@@ -188,27 +185,21 @@ def main(argv):
                 keras.callbacks.EarlyStopping(monitor='loss',patience = 2, restore_best_weights = True),
                 cp_callback 
             ] 
-            if FLAGS.multilabel and FLAGS.single_binary:
-                model=b_model
+            model=b_model
             # if unique_labels[i]=='Hydro_K':
             #     pdb.set_trace()
-            model.train(train_data, val_data, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,lr = FLAGS.learning_rate, \
+            model.train(train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,lr = FLAGS.learning_rate, \
                 callbacks=training_callbacks, binary=FLAGS.binary, ind=i, graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
             # model.model = tf.keras.models.load_model(checkpoint_path+'/'+unique_labels[i])
-            AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,test_data, FLAGS.batch_size, unique_labels, graph=FLAGS.graph, binary=FLAGS.binary, ind=i, num_cont=FLAGS.fill_cont)
+            AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,test_dat_aug, FLAGS.batch_size, unique_labels, graph=FLAGS.graph, binary=FLAGS.binary, ind=i, num_cont=FLAGS.fill_cont)
             AUCs[unique_labels[i]], PR_AUCs[unique_labels[i]], confu_mats[unique_labels[i]] = AUC, PR_AUC, confusion_matrixs
-            if FLAGS.multilabel:
-                if FLAGS.graph:
-                    model_name = './saved_model/'+FLAGS.model+'_'+FLAGS.dataset+'_multi_binary_'+unique_labels[i]+'_graph_'+str(FLAGS.seq_len)+'_'+str(FLAGS.fill_cont)
-                else:
-                    model_name = './saved_model/'+FLAGS.model+'_'+FLAGS.dataset+'_multi_binary_'+unique_labels[i]+'_'+str(FLAGS.seq_len)
-                model.model.save(model_name)
+            if FLAGS.graph:
+                model_name = './saved_model/'+FLAGS.model+'/'+FLAGS.model+'_'+FLAGS.dataset+'_multi_binary_'+\
+                    unique_labels[i]+'_graph_'+str(FLAGS.seq_len)+'_'+str(FLAGS.fill_cont) + 'no_pdb' + str(FLAGS.no_pdb)
             else:
-                if FLAGS.graph:
-                    model_name = './saved_model/'+FLAGS.model+'_'+FLAGS.dataset+'_binary_'+unique_labels[i]+'_graph_'+str(FLAGS.seq_len)+'_'+str(FLAGS.fill_cont)
-                else:
-                    model_name = './saved_model/'+FLAGS.model+'_'+FLAGS.dataset+'_binary_'+unique_labels[i]+'_' +str(FLAGS.seq_len)
-                model.model.save(model_name)
+                model_name = './saved_model/'+FLAGS.model+'/'+FLAGS.model+'_'+FLAGS.dataset+'_multi_binary_'+\
+                    unique_labels[i]+'_'+str(FLAGS.seq_len)
+            model.model.save(model_name)
         for u in unique_labels:
             # print(u)
             print('%.3f'%PR_AUCs[u])
