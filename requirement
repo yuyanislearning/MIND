@@ -1,3 +1,6 @@
 Biopython
 spektral
 tensorflow_addons
+matplotlib
+seaborn
+numpy==1.18.5

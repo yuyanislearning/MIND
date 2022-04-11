@@ -1,5 +1,6 @@
 ALL_AAS = 'ACDEFGHIKLMNPQRSTUVWXY'
-ADDITIONAL_TOKENS = ['<OTHER>', '<START>', '<END>', '<PAD>']
+ADDITIONAL_TOKENS = ['<OTHER>', '<START>', '<END>', '<PAD>', '<MASK>']
+# MLM_ADDITIONAL_TOKENS = ['<OTHER>', '<START>', '<END>', '<PAD>','<MASK>']
 
 # Each sequence is added <START> and <END> tokens
 ADDED_TOKENS_PER_SEQ = 2
