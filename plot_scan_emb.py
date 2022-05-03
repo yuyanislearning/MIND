@@ -12,7 +12,10 @@ from sklearn.decomposition import PCA
 def tsne_plot(embs, true_labels, fig_path, perplexity=30):
     X_embedded = TSNE(perplexity=perplexity).fit_transform(embs)
     dat = pd.DataFrame(data = {'X':X_embedded[:,0], 'Y':X_embedded[:,1], 'kinase':true_labels})
-    sns.scatterplot(data=dat, x='X', y='Y', hue='kinase', s=10, palette='Set1')
+    col = sns.color_palette("Set1")
+    ttt = set(true_labels)
+    new_col = col[0:3]+[col[4]]
+    sns.scatterplot(data=dat, x='X', y='Y', hue='kinase', s=10, palette=new_col)
     plt.show()
     plt.savefig(fig_path, dpi=300)
     plt.close()
@@ -36,9 +39,9 @@ def thres(emb, thres=5):
     return new_emb
 
 
-embs = np.load('temp_pad.npy')
-kinases = np.load('temp_kin.npy')
-fig_dir = 'analysis/figures/tsne_emb_pad/'
+embs = np.load('temp_0.5.npy')
+kinases = np.load('temp_kin_0.5.npy')
+fig_dir = 'analysis/figures/tsne_emb_0.5_new/'
 
 all_st_kinase = ['p38_Kin','CDK1_1','PLK1','Casn_Kin2','PKC_epsilon','DNA_PK','AuroA','PKC_zeta',\
     'PKC_common','GSK3_Kin','ATM_Kin','AMPK','PKA_Kin','Clk2_Kin','Cdc2_Kin','Cam_Kin2','GSK3b',\
@@ -51,7 +54,7 @@ pro_depend_kinase = ['Cdc2_Kin', 'Cdk5_Kin', 'Erk1_Kin', 'p38_Kin', 'CDK1_1', 'C
 all_y_kinase = ['EGFR_Kin','Fgr_Kin','Lck_Kin','Src_Kin','InsR_Kin','PDGFR_Kin','Itk_Kin','Abl_Kin']
 
 # for all st kinase
-select_index = [k for k,kin in enumerate(kinases) if kin in all_st_kinase]
+select_index = [k for k,kin in enumerate(kinases) if kin in acid_kinase+base_kinase+pro_depend_kinase]
 select_embs = embs[select_index,]
 select_kinases = kinases[select_index,]
 
@@ -61,38 +64,38 @@ for kin in select_kinases:
         group_kinases.append('Acidophilic')
     elif kin in base_kinase:
         group_kinases.append('Basophilic')
-    elif kin in DNA_damage_kinase:
-        group_kinases.append('DNA damage')
+    # elif kin in DNA_damage_kinase:
+    #     group_kinases.append('DNA damage')
     elif kin in pro_depend_kinase:
         group_kinases.append('Proline-dependent')
 
-norm_embs = np.divide(select_embs,np.linalg.norm(select_embs, axis=1, keepdims=True))
-thres_embs = [thres(emb,3) for emb in norm_embs]
-thres_embs = np.stack(thres_embs)
-for per in [5, 50, 100, 500]:
-    tsne_plot(norm_embs, group_kinases, fig_dir+'all_ST_kinase_emb_tsne_'+str(per)+'.png', perplexity=per)
-    tsne_plot(thres_embs, group_kinases, fig_dir + 'all_ST_kinase_emb_tsne_thres_'+str(per)+'.png',perplexity=per)
-pca_plot(norm_embs, group_kinases, fig_dir+'all_ST_kinase_emb_pca.png')
-pca_plot(thres_embs, group_kinases, fig_dir+'all_ST_kinase_emb_pca_thres.png')
+# norm_embs = np.divide(select_embs,np.linalg.norm(select_embs, axis=1, keepdims=True))
+# thres_embs = [thres(emb,3) for emb in norm_embs]
+# thres_embs = np.stack(thres_embs)
+# for per in [100]:
+#     tsne_plot(norm_embs, group_kinases, fig_dir+'all_ST_kinase_emb_tsne_'+str(per)+'.pdf', perplexity=per)
+#     tsne_plot(thres_embs, group_kinases, fig_dir + 'all_ST_kinase_emb_tsne_thres_'+str(per)+'.pdf',perplexity=per)
+# pca_plot(norm_embs, group_kinases, fig_dir+'all_ST_kinase_emb_pca.pdf')
+# pca_plot(thres_embs, group_kinases, fig_dir+'all_ST_kinase_emb_pca_thres.pdf')
 
-kinase_name = ['acid_kinase', 'base_kinase','DNA_damage_kinase','pro_depend_kinase','all_y_kinase']
-for i,kinase in enumerate([acid_kinase, base_kinase,DNA_damage_kinase,pro_depend_kinase,all_y_kinase]):
-    # for all st kinase
-    select_index = [k for k,kin in enumerate(kinases) if kin in kinase]
-    select_embs = embs[select_index,]
-    select_kinases = kinases[select_index,]
+# kinase_name = ['acid_kinase', 'base_kinase','DNA_damage_kinase','pro_depend_kinase','all_y_kinase']
+# for i,kinase in enumerate([acid_kinase, base_kinase,DNA_damage_kinase,pro_depend_kinase,all_y_kinase]):
+#     # for all st kinase
+#     select_index = [k for k,kin in enumerate(kinases) if kin in kinase]
+#     select_embs = embs[select_index,]
+#     select_kinases = kinases[select_index,]
 
-    norm_embs = np.divide(select_embs,np.linalg.norm(select_embs, axis=1, keepdims=True))
-    thres_embs = [thres(emb,3) for emb in norm_embs]
-    thres_embs = np.stack(thres_embs)
-    for per in [5, 50, 100, 500]:
-        tsne_plot(norm_embs, select_kinases, fig_dir+kinase_name[i]+'_emb_tsne_'+str(per)+'.png', perplexity=per)
-        tsne_plot(thres_embs, select_kinases, fig_dir +kinase_name[i]+ '_emb_tsne_thres_'+str(per)+'.png',perplexity=per)
-    pca_plot(norm_embs, select_kinases, fig_dir+kinase_name[i]+'_emb_pca.png')
-    pca_plot(thres_embs, select_kinases, fig_dir+kinase_name[i]+'_emb_pca_thres.png')
+#     norm_embs = np.divide(select_embs,np.linalg.norm(select_embs, axis=1, keepdims=True))
+#     thres_embs = [thres(emb,3) for emb in norm_embs]
+#     thres_embs = np.stack(thres_embs)
+#     for per in [5, 50, 100, 500]:
+#         tsne_plot(norm_embs, select_kinases, fig_dir+kinase_name[i]+'_emb_tsne_'+str(per)+'.pdf', perplexity=per)
+#         tsne_plot(thres_embs, select_kinases, fig_dir +kinase_name[i]+ '_emb_tsne_thres_'+str(per)+'.pdf',perplexity=per)
+#     pca_plot(norm_embs, select_kinases, fig_dir+kinase_name[i]+'_emb_pca.pdf')
+#     pca_plot(thres_embs, select_kinases, fig_dir+kinase_name[i]+'_emb_pca_thres.pdf')
 
 
-my_kinase = ['Akt_Kin','CDK1_1','AuroB','Casn_Kin2']
+my_kinase = ['AuroB','Casn_Kin2','AMPK','Erk1_Kin']
 
 # for all st kinase
 select_index = [k for k,kin in enumerate(kinases) if kin in my_kinase]
@@ -103,9 +106,9 @@ norm_embs = np.divide(select_embs,np.linalg.norm(select_embs, axis=1, keepdims=T
 thres_embs = [thres(emb,3) for emb in norm_embs]
 thres_embs = np.stack(thres_embs)
 
-for per in [5,100,500]:
-    tsne_plot(norm_embs, select_kinases, fig_dir+'my_emb_tsne_'+str(per)+'.png', perplexity=per)
-    tsne_plot(thres_embs, select_kinases, fig_dir +'my_emb_thres_tsne_'+str(per)+'.png',perplexity=per)
-pca_plot(norm_embs, select_kinases, fig_dir+'my_emb_pca.png')
-pca_plot(thres_embs, select_kinases, fig_dir+'my_emb_thres_pca.png')
+for per in [50,100,500]:
+    tsne_plot(norm_embs, select_kinases, fig_dir+'my_emb_tsne_'+str(per)+'.pdf', perplexity=per)
+    tsne_plot(thres_embs, select_kinases, fig_dir +'my_emb_thres_tsne_'+str(per)+'.pdf',perplexity=per)
+pca_plot(norm_embs, select_kinases, fig_dir+'my_emb_pca.pdf')
+pca_plot(thres_embs, select_kinases, fig_dir+'my_emb_thres_pca.pdf')
 

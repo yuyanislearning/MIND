@@ -219,7 +219,7 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
             grads = tape.gradient(top_class, embed) # (alpha, seq, dim)
             grads = (grads[:-1] + grads[1:]) / tf.constant(2.0) # calculate integration
             integrated_grads = tf.math.reduce_mean(grads, axis = 0) * (emb[i,:,:] - baseline[i,:,:])  # integration
-            final_grads.append(tf.math.sqrt(tf.reduce_mean(tf.math.square(integrated_grads[ seq_idx-10+i, :]), axis=-1)).numpy()) #norm of the specific aa
+            final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-10+i, :], axis=-1).numpy()) #norm of the specific aa
 
         return np.array(final_grads), top_class[-1]
 
@@ -306,17 +306,17 @@ def main(argv):
                     m_steps = 50
                     alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
 
-                    pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
-                    pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
-                    interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx, 'pad',pad_baseline)
-                    # interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx)
+                    # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
+                    # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
+                    # interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx, 'pad',pad_baseline)
+                    interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx)
                     if baseline is None:
                         continue
                     temp_label = 'Phos_ST' if seq[seq_idx] in 'ST' else 'Phos_Y'
                     emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[temp_label], \
                         seq_idx, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
     
-                    if prob>0.8:
+                    if prob>0.5:#
                         embs.append(emb_grads)
                         kinases.append(site[1])
     
@@ -336,10 +336,12 @@ def main(argv):
         select_index = [k for k,kin in enumerate(kinases) if kin in kina]
         select_embs = embs[select_index,]
         select_kinases = kinases[select_index,]
-        dist_plot(select_embs, 'analysis/figures/kinase_dist_pad/'+kina+'.png', thres=3)
+        dist_plot(select_embs, 'analysis/figures/kinase_dist/'+kina+'.png', thres=3)
+        dist_plot2(select_embs, 'analysis/figures/kinase_dist/sum_'+kina+'.png')
         # good shape: ATM_kin
 
-    pdb.set_trace()
+    np.save('temp_0.5.npy', embs)
+    np.save('temp_kin_0.5.npy', kinases)
     select_index = [k for k,kin in enumerate(kinases) if kin in all_st_kinase]
     select_embs = embs[select_index,]
     select_kinases = kinases[select_index,]
@@ -378,6 +380,18 @@ def dist_plot(embs, fig_path, thres=3):
     plt.savefig(fig_path, dpi=300)
     plt.close()
 
+def dist_plot2(embs, fig_path):
+    embs = np.sum(embs, axis=0)
+    fig, ax = plt.subplots(figsize=(10,5), layout='constrained')
+    embs = np.squeeze(embs)
+    ax.plot(list(range(len(embs))), embs)
+    ax.scatter(10, embs[10], 50, facecolors='none', edgecolors='black', linewidths=1.5)
+    # ax = sns.heatmap(a)
+    
+    # sns.lineplot(list(range(len(a))), a)
+    # plt.plot(highlight_idx, a[highlight_idx], markersize=29, fillstyle='none', markeredgewidth=1.5)
+    plt.show()
+    plt.savefig(fig_path)
 
 def tsne_plot(embs, true_labels, fig_path, perplexity=30):
     X_embedded = TSNE(perplexity=perplexity).fit_transform(embs)

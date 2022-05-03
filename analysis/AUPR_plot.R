@@ -22,8 +22,8 @@ coul = brewer.pal(nrow(data_sample)-2, "Set1")
 colors_border = coul
 colors_in = alpha(coul, 0.3)
 # plot with default options:
-pdf('figures/AUPR_all.pdf', width = 10, height = 7)
-radarchart(data_sample, axistype = 1 , 
+pdf('figures/OPTM_LSTM.pdf', width = 10, height = 7)
+radarchart(data_sample, axistype = 1 , pty = 32,
            # custom polygon
            pcol = colors_border , pfcol = colors_in , plwd = 3 , plty = c(2,rep(1,4)),
            # custom the grid

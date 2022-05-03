@@ -35,29 +35,56 @@ label_pn = {label:{'P':0,'N':0} for label in label2aa}
 
 # pdb.set_trace()
 
-for label in label2aa:
-    for k in tqdm(dat):
-        if dat[k].get('seq',-1)==-1:
+# for label in label2aa:
+#     for k in tqdm(dat):
+#         if dat[k].get('seq',-1)==-1:
+#             continue
+
+#         sequence = str(dat[k]['seq'])
+#         labels = dat[k]['label']
+#         P_exist = False
+#         for lbl in labels:
+#             if lbl['ptm_type']==label:
+#                 P_exist=True
+#                 label_pn[label]['P']+=1
+#             else:
+#                 continue
+#         if P_exist:
+#             label_pn[label]['N']+= sum([s in label2aa[label] for s in sequence])
+
+# label_weights = {label:(label_pn[label]['N']/2/label_pn[label]['P'] - label_pn[label]['N']/2/(label_pn[label]['N'] - label_pn[label]['P']), \
+#     label_pn[label]['N']/2/(label_pn[label]['N'] - label_pn[label]['P'])) for label in label_pn}
+# # with open('./res/class_weigth.json','w') as f:
+# #     json.dump(label_weights, f)
+
+# label_pn = {label:[label_pn[label]['P']/label_pn[label]['N'], \
+#     label_pn[label]['P'], label_pn[label]['N']-label_pn[label]['P']] for label in label_pn}
+
+label_pn = {'glyco_S':{'P':0,'N':0}, 'glyco_T':{'P':0,'N':0}}
+
+label= 'glyco_ST'
+for k in tqdm(dat):
+    if dat[k].get('seq',-1)==-1:
+        continue
+
+    sequence = str(dat[k]['seq'])
+    labels = dat[k]['label']
+    P_exist_S = False
+    P_exist_T = False
+    for lbl in labels:
+        if lbl['ptm_type']==label:
+            if sequence[lbl['site']]=='S':
+                P_exist_S=True
+                label_pn['glyco_S']['P']+=1
+            elif sequence[lbl['site']]=='T':
+                P_exist_T = True
+                label_pn['glyco_T']['P']+=1
+        else:
             continue
+    if P_exist_S:
+        label_pn['glyco_S']['N']+= sum([s in 'S' for s in sequence])
+    if P_exist_S:
+        label_pn['glyco_T']['N']+= sum([s in 'T' for s in sequence])
 
-        sequence = str(dat[k]['seq'])
-        labels = dat[k]['label']
-        P_exist = False
-        for lbl in labels:
-            if lbl['ptm_type']==label:
-                P_exist=True
-                label_pn[label]['P']+=1
-            else:
-                continue
-        if P_exist:
-            label_pn[label]['N']+= sum([s in label2aa[label] for s in sequence])
-
-label_weights = {label:(label_pn[label]['N']/2/label_pn[label]['P'] - label_pn[label]['N']/2/(label_pn[label]['N'] - label_pn[label]['P']), \
-    label_pn[label]['N']/2/(label_pn[label]['N'] - label_pn[label]['P'])) for label in label_pn}
-# with open('./res/class_weigth.json','w') as f:
-#     json.dump(label_weights, f)
-
-label_pn = {label:[label_pn[label]['P']/label_pn[label]['N'], \
-    label_pn[label]['P'], label_pn[label]['N']-label_pn[label]['P']] for label in label_pn}
 
 pprint(label_pn)

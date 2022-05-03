@@ -118,21 +118,19 @@ def main(argv):
     
     chunk_size = FLAGS.seq_len - 2
 
-    if False:
-
+    if True:
+        kin_name = 'CDK1_1'
         with open('/workspace/PTM/Data/Musite_data/Phosphorylation_motif/correct_scan_kinase.json') as fk:
             scan = json.load(fk)
-        pad_locals = []
         zero_locals = []
         for uid in scan:
             for kin in scan[uid]:
-                if kin[1]=='CDK1_2':           
-                    site = kin[0]+1 
+                if kin[1]==kin_name and uid =='O77562':           
+                    site = kin[0]-1
                     with open('/workspace/PTM/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
                         # data structure: {PID:{seq, label:[{site, ptm_type}]}}
                         sequence = str(list(SeqIO.parse(fp, 'fasta'))[0].seq)
                         records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])
-
                     preds = {}
                     for record in records:
                         seq = record['seq']
@@ -141,14 +139,6 @@ def main(argv):
 
                         X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
                         X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-
-                        y_pred = model.predict(X)
-                        y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
-                        y_pred = y_pred[:,:,label_to_index['Phos_ST']]
-
-                        for i in idx:
-                            ix = i+chunk_id*(FLAGS.seq_len-2)//2
-                            preds[ix] = y_pred[0,i+1]
 
                         if chunk_id==0:
                             cover_range = (0,chunk_size//4*3)
@@ -161,89 +151,74 @@ def main(argv):
                         if site >=cover_range[0] and site < cover_range[1]:
                             # get gradient for specific ptm
                             seq_idx = site - chunk_id*chunk_size//2 
-                            # emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], seq_idx,method='gradient')
                             fig_name = 'figs/'+'_'.join([uid,str(site), 'Phos_ST'])
-                            # heatmap(emb_grads, seq_idx, fle=(fig_name+'_gradient.png', fig_name+'_local_gradient.png'))
-
-                            # get intergrated gradient for specific ptm
-                            emb = emb_model(X)
-                            m_steps = 50
-                            alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
-                            pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
-                            pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
-                            interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                            # interpolated_emb, baseline = interpolate_emb(emb, alphas)
-                            emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], \
-                                seq_idx, interpolated_emb, method='integrated_gradient', emb=emb, baseline=baseline)
-                            pad_local = heatmap(emb_grads, seq_idx, fle=(fig_name+'_pad_integrated_gradient.png',fig_name+'_pad_local_integrated_gradient.png'))
-                            pad_locals.append(pad_local)
-
                             emb = emb_model(X)
                             m_steps = 50
                             alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
                             # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
                             # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
                             # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                            interpolated_emb, baseline = interpolate_emb(emb, alphas)
+                            interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx)
                             emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], \
-                                seq_idx, interpolated_emb, method='integrated_gradient', emb=emb, baseline=baseline)
-                            zero_local = heatmap(emb_grads, seq_idx, fle=(fig_name+'_integrated_gradient.png',fig_name+'_local_integrated_gradient.png'))
-                            zero_locals.append(zero_local)
-    elif True:
-        site = 2345
-        uid = 'A2AJK6'
-        with open('/workspace/PTM/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
-            # data structure: {PID:{seq, label:[{site, ptm_type}]}}
-            sequence = str(list(SeqIO.parse(fp, 'fasta'))[0].seq)
-        SNP1_sequence = sequence[:1441] + 'C' + sequence[(1441 + 1):]
-        SNP2_sequence = sequence[:1441] + 'G' + sequence[(1441 + 1):]
-        for j,snp_seq in enumerate([sequence, SNP1_sequence, SNP2_sequence]):
-            sequence = snp_seq
-            records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])
+                                seq_idx, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
+                            if prob>0.9:
+                                zero_local = heatmap(emb_grads, 7, fle=(fig_name+'_'+kin_name+'_local_integrated_gradient.pdf'))
+                                zero_locals.append(zero_local)
+    # elif True:
+    #     site = 2345
+    #     uid = 'A2AJK6'
+    #     with open('/workspace/PTM/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
+    #         # data structure: {PID:{seq, label:[{site, ptm_type}]}}
+    #         sequence = str(list(SeqIO.parse(fp, 'fasta'))[0].seq)
+    #     SNP1_sequence = sequence[:1441] + 'C' + sequence[(1441 + 1):]
+    #     SNP2_sequence = sequence[:1441] + 'G' + sequence[(1441 + 1):]
+    #     for j,snp_seq in enumerate([sequence, SNP1_sequence, SNP2_sequence]):
+    #         sequence = snp_seq
+    #         records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])
 
-            preds = {}
-            for record in records:
-                seq = record['seq']
-                idx = record['idx']
-                chunk_id = record['chunk_id']
+    #         preds = {}
+    #         for record in records:
+    #             seq = record['seq']
+    #             idx = record['idx']
+    #             chunk_id = record['chunk_id']
 
-                X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+    #             X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
+    #             X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
 
-                y_pred = model.predict(X)
-                y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
-                y_pred = y_pred[:,:,label_to_index['Phos_ST']]
+    #             y_pred = model.predict(X)
+    #             y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
+    #             y_pred = y_pred[:,:,label_to_index['Phos_ST']]
 
-                for i in idx:
-                    ix = i+chunk_id*(FLAGS.seq_len-2)//2
-                    preds[ix] = y_pred[0,i+1]
+    #             for i in idx:
+    #                 ix = i+chunk_id*(FLAGS.seq_len-2)//2
+    #                 preds[ix] = y_pred[0,i+1]
 
-                if chunk_id==0:
-                    cover_range = (0,chunk_size//4*3)
-                elif chunk_id==((len(sequence)-1)//-1):
-                    cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
-                else:
-                    cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
+    #             if chunk_id==0:
+    #                 cover_range = (0,chunk_size//4*3)
+    #             elif chunk_id==((len(sequence)-1)//-1):
+    #                 cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
+    #             else:
+    #                 cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
 
-                # only get gradient when the seq_idx fall in the range
-                if site >=cover_range[0] and site < cover_range[1]:
-                    # get gradient for specific ptm
-                    seq_idx = site - chunk_id*chunk_size//2 
-                    # emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], seq_idx,method='gradient')
-                    fig_name = 'figs/'+'_'.join([uid,str(site), 'Phos_ST'])
-                    # heatmap(emb_grads, seq_idx, fle=(fig_name+'_gradient.png', fig_name+'_local_gradient.png'))
+    #             # only get gradient when the seq_idx fall in the range
+    #             if site >=cover_range[0] and site < cover_range[1]:
+    #                 # get gradient for specific ptm
+    #                 seq_idx = site - chunk_id*chunk_size//2 
+    #                 # emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], seq_idx,method='gradient')
+    #                 fig_name = 'figs/'+'_'.join([uid,str(site), 'Phos_ST'])
+    #                 # heatmap(emb_grads, seq_idx, fle=(fig_name+'_gradient.png', fig_name+'_local_gradient.png'))
 
-                    emb = emb_model(X)
-                    m_steps = 50
-                    alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
-                    # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
-                    # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
-                    # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                    interpolated_emb, baseline = interpolate_emb(emb, alphas)
-                    emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], \
-                        seq_idx, interpolated_emb, method='integrated_gradient', emb=emb, baseline=baseline)
-                    fig_add_name = ['','_R1441C','_R1441G']
-                    zero_local = heatmap(emb_grads, seq_idx, fle=(fig_name+fig_add_name[j]+'_integrated_gradient.png',fig_name+fig_add_name[j]+'_local_integrated_gradient.png'))
+    #                 emb = emb_model(X)
+    #                 m_steps = 50
+    #                 alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
+    #                 # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
+    #                 # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
+    #                 # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
+    #                 interpolated_emb, baseline = interpolate_emb(emb, alphas)
+    #                 emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], \
+    #                     seq_idx, interpolated_emb, method='integrated_gradient', emb=emb, baseline=baseline)
+    #                 fig_add_name = ['','_R1441C','_R1441G']
+    #                 zero_local = heatmap(emb_grads, seq_idx, fle=(fig_name+fig_add_name[j]+'_integrated_gradient.pdf',fig_name+fig_add_name[j]+'_local_integrated_gradient.pdf'))
                 
     else:
         with open('/workspace/PTM/Data/Musite_data/ptm/PTM_test.json') as f:
@@ -305,17 +280,46 @@ def main(argv):
                                 heatmap(emb_grads, seq_idx, fle=(fig_name+'_integrated_gradient.png',fig_name+'_local_integrated_gradient.png'))
         # pprint(preds) Q3SYY2 342 glyco_N
 
-def interpolate_emb( emb, alphas, baseline=None):
+def interpolate_emb( emb, alphas, seq_idx, baseline_med='blank', baseline=None):
     # interpolate embedding and baseline
     if baseline is None:
-        baseline = np.zeros(emb.shape)
-    alphas_x = alphas[:, tf.newaxis, tf.newaxis]
-    baseline_x = tf.cast(baseline, emb.dtype)
-    emb_x = emb
-    delta = emb_x - baseline_x
-    embs = baseline_x + alphas_x * delta
+        baseline = get_baseline(emb, baseline_med, seq_idx)
+        # baseline = np.zeros(emb.shape)
+        if baseline is None:
+            return None, None
+    else:
+        baseline = get_baseline(emb, baseline_med, seq_idx, baseline)
+        if baseline is None:
+            return None, None
+    alphas_x = alphas[:, tf.newaxis, tf.newaxis, tf.newaxis]
+    baseline = tf.cast(baseline, emb.dtype)
+    emb_x = tf.expand_dims( emb, 0)
+    baseline_x = tf.expand_dims(baseline, 0)
+    emb_x = tf.tile(emb_x, (1,21,1,1))# match the 21 aa selected in baseline
+    delta = emb_x - baseline_x #(1, 21, seq_len, dim)
+    embs = baseline_x + alphas_x * delta #(alpha, 21, seq_len, dim)
+    seq_len, dim = embs.shape[2], embs.shape[3]
+    embs = tf.reshape(embs, (len(alphas)*21, seq_len, dim))# reshape to batch first
+    # baseline_x = tf.reshape(baseline_x, (len(alphas)*21, seq_len, dim))
     return embs, baseline
 
+
+def get_baseline(emb, baseline_med, seq_idx, baseline=None):
+    if seq_idx-10<0 or seq_idx+11>emb.shape[1]:
+        return None
+    if baseline_med =='blank':
+        tile_emb = tf.tile(emb, (21,1,1)).numpy() # duplicate the batch
+        for i in range(21):
+            tile_emb[i,seq_idx-10+i,:] = 0 # set as zero for specific aa
+        
+    elif baseline_med == 'pad':
+        tile_emb = tf.tile(emb, (21,1,1)).numpy()
+        baseline = tf.tile(baseline, (21,1,1)).numpy()
+        for i in range(21):
+            tile_emb[i, seq_idx-10+i, :] = baseline[i, seq_idx-10+i, :] # replace with pad baseline
+        
+    tile_emb = tf.convert_to_tensor(tile_emb)
+    return tile_emb
 
 def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=None, method=None, emb=None, baseline=None):
     """Computes the gradients of outputs w.r.t input embedding.
@@ -342,50 +346,39 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
         return tf.math.sqrt(tf.math.reduce_mean(tf.math.square(grads), axis = -1)).numpy()
 
     if method == 'integrated_gradient':
-        with tf.GradientTape() as tape:
-            tape.watch(embedding)
-            temp_X = [ tf.tile(x, tf.constant([embedding.shape[0]]+(len(x.shape)-1)*[1])) for x in X] + [embedding]
-            out_pred = grad_model(temp_X)
-            top_class = out_pred[:,seq_idx, top_pred_idx]
-            
+        # batching since it's too big
+        alpha, seq_len, dim = embedding.shape[0]//21, embedding.shape[1],embedding.shape[2]
+        embedding = tf.reshape(embedding, (alpha, 21, seq_len, dim))
+        final_grads = []
+        for i in range(21):
+            with tf.GradientTape() as tape:
+                embed = embedding[:,i,:,:] #(alpha,)
+                tape.watch(embed)
+                temp_X = [ tf.tile(x, tf.constant([alpha]+(len(x.shape)-1)*[1])) for x in X] + [embed] # tile sequence x to match emb
+                out_pred = grad_model(temp_X)
+                top_class = out_pred[:,seq_idx, top_pred_idx]
+                
 
-        grads = tape.gradient(top_class, embedding)
-        grads = (grads[:-1] + grads[1:]) / tf.constant(2.0)
-        return tf.math.sqrt(tf.reduce_mean(tf.math.square(tf.math.reduce_mean(grads, axis = 0) * (emb - baseline)), axis=-1)).numpy(), top_class[-1]
+            grads = tape.gradient(top_class, embed) # (alpha, seq, dim)
+            grads = (grads[:-1] + grads[1:]) / tf.constant(2.0) # calculate integration
 
+            integrated_grads = tf.math.reduce_mean(grads, axis = 0) * (emb[i,:,:] - baseline[i,:,:])  # integration
+            final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-10+i, :], axis=-1).numpy()) #norm of the specific aa
+
+        return np.array(final_grads), top_class[-1]
+        
 def heatmap(a, highlight_idx, fle):
+    a = a[3:18]
     fig, ax = plt.subplots(figsize=(10,5), layout='constrained')
     a = np.squeeze(a)
-    ax.plot(list(range(len(a))), a)
-    ax.scatter(highlight_idx, a[highlight_idx], 50, facecolors='none', edgecolors='black', linewidths=1.5)
-    # ax = sns.heatmap(a)
-    
-    # sns.lineplot(list(range(len(a))), a)
-    # plt.plot(highlight_idx, a[highlight_idx], markersize=29, fillstyle='none', markeredgewidth=1.5)
-    plt.show()
-    plt.savefig(fle[0])
-
-    # plot local
-    plt.close()
-    fig, ax = plt.subplots(figsize=(10,5), layout='constrained')
-    a = np.squeeze(a)
-    left = highlight_idx-7
-    right = highlight_idx+8
-    if left <0:
-        left = 0
-    else:
-        highlight_idx=7
-    if right > len(a):
-        right=len(a)
-    a = a[left:right]
     ax.plot(list(range(-7,8,1)), a)
-    ax.scatter(0, a[highlight_idx], 50, facecolors='none', edgecolors='black', linewidths=1.5)
+    ax.scatter(0, a[7], 50, facecolors='none', edgecolors='black', linewidths=1.5)
     # ax = sns.heatmap(a)
     
     # sns.lineplot(list(range(len(a))), a)
     # plt.plot(highlight_idx, a[highlight_idx], markersize=29, fillstyle='none', markeredgewidth=1.5)
     plt.show()
-    plt.savefig(fle[1])
+    plt.savefig(fle)
     plt.close()
     return a
 

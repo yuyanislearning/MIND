@@ -138,7 +138,7 @@ def main(argv):
     FLAGS = flags.FLAGS
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = FLAGS.tflog
 
-    limit_gpu_memory_growth()
+    # limit_gpu_memory_growth()
     random.seed(FLAGS.random_seed)
     np.random.seed(FLAGS.random_seed)
     tf.random.set_seed(FLAGS.random_seed)
@@ -152,7 +152,8 @@ def main(argv):
     
     # class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
     if not FLAGS.neg_sam:
-        with open('/workspace/PTM/PTM-pattern-finder/analysis/res/class_weights.json','r') as f:
+        # with open('/workspace/PTM/PTM-pattern-finder/analysis/res/class_weights.json','r') as f:
+        with open('/workspace/PTM/Data/OPTM/combined/class_weigth.json','r') as f:
             class_weights = json.load(f)
             lower = 1
             class_weights = {k:[class_weights[k][0]*lower,class_weights[k][1]] for k in class_weights}
@@ -162,7 +163,7 @@ def main(argv):
         train_dat_aug.train_val_split()
         val_dat_aug = train_dat_aug.init_fold(0)
         train_dat_aug.on_epoch_end()
-    else:
+    else:# Load data
         train_dat_aug = PTMDataGenerator(data_prefix+'train.json', FLAGS, shuffle=True,ind=None, eval=False, class_weights=class_weights)
         unique_labels = train_dat_aug.unique_labels
         val_dat_aug = PTMDataGenerator(data_prefix+'val.json', FLAGS, shuffle=True,ind=None, eval=True)
@@ -248,6 +249,10 @@ def main(argv):
             logging.info('------------------evaluate---------------------' )
             AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,test_dat_aug, FLAGS.batch_size, unique_labels, \
                 FLAGS.graph, num_cont=FLAGS.fill_cont)
+
+            optms = ["Arg-OH_R","Asn-OH_N","Asp-OH_D","Cys4HNE_C","CysSO2H_C",\
+            "CysSO3H_C","Lys-OH_K","Lys2AAA_K","MetO_M","MetO2_M","Phe-OH_F",\
+            "ProCH_P","Trp-OH_W","Tyr-OH_Y","Val-OH_V"]
             for u in unique_labels:
                 print('%.3f'%PR_AUC[u])
             for u in unique_labels:
@@ -308,12 +313,15 @@ def main(argv):
                     model_name+='_no_pdb_' + str(FLAGS.no_pdb)
             if FLAGS.save_model:
                 model.model.save(model_name)
+
         for u in unique_labels:
             # print(u)
-            print('%.3f'%PR_AUCs[u])
+            if u in optms:
+                print('%.3f'%PR_AUCs[u])
         for u in unique_labels:
-            print(u)
-            print(confu_mats[u])
+            if u in optms:
+                print(u)
+                print(confu_mats[u])
         
     t1 = time.time()
     total_time = t1-t0

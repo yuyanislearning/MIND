@@ -29,8 +29,10 @@ from src.model import TransFormerFixEmbed,  RNN_model, TransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
-model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3_20_fold_random'
-fold = 20
+# model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3OPTM_r15'
+# model_name = 'saved_model/CNN/CNN_514_multin_layer_3CNN_36912/'
+model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3_15_fold_random'
+fold = 15
 avg_weight = False
 
 
@@ -143,6 +145,9 @@ def main(argv):
 
     label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
     'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+    # label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
+    #     "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
+    #     "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
     labels = list(label2aa.keys())
     # get unique labels
     unique_labels = sorted(set(labels))
@@ -150,9 +155,10 @@ def main(argv):
     index_to_label = {i: str(label) for i, label in enumerate(unique_labels)}
     chunk_size = FLAGS.seq_len - 2
 
-    with open(model_name+'__PRAU.json') as f:
+    with open(model_name+'_PRAU.json') as f:
         AUPR_dat = json.load(f)
     
+    # models = [tf.keras.models.load_model(model_name)]
     models = [] # load models
     for i in range(fold):#
         models.append(tf.keras.models.load_model(model_name+'_fold_'+str(i)))
@@ -165,10 +171,18 @@ def main(argv):
     half_chunk_size = chunk_size//2
 
     # for ptm in label2aa.keys():
-    with open('/workspace/PTM/MusiteDeep_web/MusiteDeep/PTM_test.fasta', 'r') as fp:#TODO /workspace/PTM/MusiteDeep_web/MusiteDeep/PTM_test.fasta
-        for rec in tqdm(SeqIO.parse(fp, 'fasta')): # for every fasta contains phos true label
-            sequence = str(rec.seq)
-            uid = str(rec.id)
+    # with open('/workspace/PTM/Data/OPTM/pig_prot_all.fasta', 'r') as fp:#TODO # /workspace/PTM/Data/BCAA/mouse_pdh.fasta
+        # for rec in tqdm(SeqIO.parse(fp, 'fasta')): # for every fasta contains phos true label
+        #     sequence = str(rec.seq)
+        #     uid = str(rec.id)
+    with open('/workspace/PTM/Data/OPTM/OPTM_filtered.json') as fp:
+        dat = json.load(fp)
+    
+    # for i in range(1):#place holder
+    with open('/workspace/PTM/Data/OPTM/nonoverlap_uid.txt') as f:    
+        for line in tqdm(f):
+            uid = line.strip()
+            sequence = dat[uid]['seq']
             records = cut_protein(sequence, FLAGS.seq_len)#
             # if line =='A0A087WPF7.fa':
             #     pdb.set_trace()
@@ -180,7 +194,7 @@ def main(argv):
                 X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
                 X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
                 
-                for j in range(fold):
+                for j in range(fold):#fold
                     y_pred = models[j].predict(X)#*weights[ptm][j]                    
                     y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
                     if avg_weight:
@@ -207,7 +221,7 @@ def main(argv):
                         ix = i+chunk_id*(FLAGS.seq_len-2)//2
                         y_preds[str(uid)+'_'+str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
 
-    with open('/workspace/PTM/Data/Musite_data/PTM_test/MIND_20fold.json','w') as fw:
+    with open('/workspace/PTM/Data/Musite_data/PTM_test/PTM_on_OPTMb.json','w') as fw:
         json.dump(y_preds, fw)
 
     

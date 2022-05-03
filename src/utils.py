@@ -31,12 +31,9 @@ def handle_flags():
     flags.DEFINE_string("tflog",
             '3', "The setting for TF_CPP_MIN_LOG_LEVEL (default: 3)")
     flags.DEFINE_string('model',
-            'Transformer', 'model to use (default: proteinbert)')
+            'LSTMTransformer', 'model to use (default: proteinbert)')
     flags.DEFINE_string('dataset',
             'all', 'dataset to use (default: Alpha fold pdb available ptms)')
-    # Data configuration.
-    flags.DEFINE_string('config',
-            'config.yml', 'configure file (default: config.yml)')
     flags.DEFINE_string('data_path',
             '../Data/Musite_data/ptm', 'path to data dir')
     flags.DEFINE_string('res_path',
@@ -47,12 +44,12 @@ def handle_flags():
                 'PTM', 'name of pretrain model')  
     flags.DEFINE_string('suffix', '', 'model name suffix')
     
-    # Model parameters.
-    flags.DEFINE_bool("multilabel", False, "multilabel or not (default: True)")
+    # Model parameters. python run.py --data_path ..... --multilabel
+    flags.DEFINE_bool("multilabel", True, "multilabel or not (default: True)")
     flags.DEFINE_bool("binary", False, "Binary or not (default: False)")
     flags.DEFINE_bool("single_binary", False, "Binary or not (default: False)")
     flags.DEFINE_bool("neg_sam", False, "use ptm-specific negative sampling or not (default: True)")
-    flags.DEFINE_bool("class_weights", False, "use class weights or not (default: True)")
+    flags.DEFINE_bool("class_weights", True, "use class weights or not (default: True)")
     flags.DEFINE_bool("graph", False, "use only partial sequence (default: False)")
     flags.DEFINE_bool("split_head", False, "split head to global and local attention (default: False)")
     flags.DEFINE_bool("no_pdb", False, "not use any pdb (default: False)")
@@ -65,8 +62,8 @@ def handle_flags():
     flags.DEFINE_bool("twentyA", False, "use twentyA")
 
     # Training parameters.
-    flags.DEFINE_integer("seq_len", 512, "maximum lenth+2 of the model sequence (default: 512)")
-    flags.DEFINE_integer("batch_size", 128, "Batch Size (default: 32)")# 128 for 514; 32 for 1026; 8 for 2050
+    flags.DEFINE_integer("seq_len", 514, "maximum lenth+2 of the model sequence (default: 512)")
+    flags.DEFINE_integer("batch_size", 64, "Batch Size (default: 32)")# 128 for 514; 32 for 1026; 8 for 2050
     flags.DEFINE_integer("num_epochs",
             100, "Number of training epochs (default: 20)")
     flags.DEFINE_integer("n_lstm", 3, "number of lstm layer for rnn model")
@@ -101,7 +98,7 @@ def limit_gpu_memory_growth():
           return False
     return True
 
-class PTMDataGenerator(tf.keras.utils.Sequence):
+class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M   
     def __init__(self, file_name, FLAGS, shuffle=True,ind=None, eval=False, binary=False, class_weights=None, val=False):
         self.FLAGS = FLAGS
         records = []
@@ -154,9 +151,12 @@ class PTMDataGenerator(tf.keras.utils.Sequence):
                         continue
                     records = self.cut_protein(dat,records, k, chunk_size=FLAGS.seq_len-2, eval=eval)
         
-        # PTM label to corresponding amino acids
+        # PTM label to corresponding amino acids 
         self.label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
-        'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+        'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST',
+        "Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
+        "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
+        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
         # get unique labels
         self.unique_labels = sorted(set([l['ptm_type'] for d in records for l in d['label'] ]))
         self.label_to_index = {str(label): i for i, label in enumerate(self.unique_labels)}
@@ -179,7 +179,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence):
         self.sample_weights = []
         print('Constructing Y and sample weights')
         y_keep = []
-        for i in tqdm(range(len(self.X))):
+        for i in tqdm(range(len(self.X))):# create label matrix Y, and sample weight matrix
             # putting positive samples
             Y = np.zeros((len(self.X[i]), len(self.unique_labels))) if not self.binary \
                 else np.zeros((len(self.X[i]), 1))
@@ -278,7 +278,10 @@ class PTMDataGenerator(tf.keras.utils.Sequence):
     def split_val(self, val_idx):
         val_aug = PTMDataGenerator(None, self.FLAGS, shuffle=True, eval=True, binary=self.binary, val=True)
         val_aug.label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
-        'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+        'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST',
+        "Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
+        "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
+        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
         # get unique labels
         val_aug.unique_labels = self.unique_labels
         val_aug.label_to_index = self.label_to_index

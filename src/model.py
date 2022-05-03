@@ -260,21 +260,21 @@ class CNN_model(Raw_model):
         x = tf.nn.leaky_relu(x, alpha=0.01)
         # res_x = x
         # x = self.padding1(x)
-        x = self.dropout(x)
+        # x = self.dropout(x)
         x = self.CNN2(x)
         x = tf.nn.leaky_relu(x, alpha=0.01) #+ res_x
         # res_x = x
         # x = self.padding2(x)
-        x = self.dropout(x) 
+        # x = self.dropout(x) 
 
         x = self.CNN3(x)
         x = tf.nn.leaky_relu(x, alpha=0.01)
-        x = self.dropout(x) 
+        # x = self.dropout(x) 
         # x = x+ res_x
         # x = self.padding3(x)
         x = self.CNN4(x)
         x = tf.nn.leaky_relu(x, alpha=0.01)
-        x = self.dropout(x) 
+        # x = self.dropout(x) 
 
         # for i in range(3):#TODO
         #     last_hidden_layer = layers.Bidirectional(layers.LSTM(d_hidden_seq,  return_sequences=True),  name='lstm-'+str(i+1))(last_hidden_layer)
