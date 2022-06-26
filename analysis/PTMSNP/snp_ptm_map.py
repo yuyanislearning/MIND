@@ -1,20 +1,20 @@
 import json
 from pprint import pprint
 
+# SNPs = {'O94759':[('V','934','I')], 'P02649':[('C','130','R')], 'Q5S007':[('G','2019','S')],
+#     'Q8TF76':[('V','76','E')],'Q96RQ3':[('H','464','P')],'Q9BSA9':[('M','393','T')],'Q9C0K1':[('A','391','T')]}
 uid = 'Q5S007'
-snps = [("R","793","M"),("I","1122","V"),("S","1228","T"),("M","712","V"),("R","1723","P"),
-("R","1723","P"),("G","2019","S"),("I","2020","T"),("I","952","T"),("R","1628","P"),("G","2019","S"),
-("I","2020","T"),("Q","930","R"),("I","1122","V"),("R","1398","H"),("R","1441","C"),("R","1441","G"),
-("R","1441","H"),("M","1646","T"),("S","1647","T"),("N","2261","I"),("A","419","V"),("S","1283","T"),
-("Q","930","R"),("R","1398","H"),("R","1441","C"),("R","1441","C"),("R","1441","G"),("R","1441","G"),
-("R","1441","H"),("R","1441","H"),("T","2031","S"),("K","1359","I"),("I","1371","V"),("T","2031","S"),
-("T","2031","S"),("I","952","T"),("Q","930","R")]
-
-for snp in snps:
-    with open('/workspace/PTM/Data/PTMVar/res/'+uid+'_'+snp[0]+snp[1]+snp[2]+'.json') as f:
+snps = [("M","712","V"),("R","793","M"),("Q","930","R"),("R","1067","Q"),("S","1096","C"),
+        ("I","1122","V"),("S","1228","T"),("I","1371","V"),("R","1441","C"),("R","1441","G"),("R","1441","H"),
+        ("R","1514","Q"),("P","1542","S"),("V","1598","E"),("Y","1699","C"),("R","1728","H"),("R","1728","L"),
+        ("M","1869","T"),("R","1941","H"),("I","2012","T"),("G","2019","S"),("I","2020","T"),("T","2031","S"),
+        ("T","2141","M"),("R","2143","H"),("D","2175","H"),("Y","2189","C"),("T","2356","I"),("G","2385","R"),
+        ("V","2390","M"),("L","2439","I"),("L","2466","H")]
+for snp in snps:#SNPs:
+    with open('/workspace/PTM/Data/PTMVar/res/'+uid+'_'+snp[0]+snp[1]+snp[2]+'_OPTM.json') as f:
         mut = json.load(f)
 
-    with open('/workspace/PTM/Data/PTMVar/res/'+uid+'.json') as f:
+    with open('/workspace/PTM/Data/PTMVar/res/'+uid+'_OPTM.json') as f:
         wt = json.load(f)
 
     dat = {}
@@ -53,7 +53,7 @@ for snp in snps:
         if float(mut[k]) > 0.5:
             new_dat[ptm][1]+=1
 
-    with open('/workspace/PTM/Data/PTMVar/res/'+uid+'_'+snp[0]+snp[1]+snp[2]+'_map.json','w') as f:
+    with open('/workspace/PTM/Data/PTMVar/res/'+uid+'_'+snp[0]+snp[1]+snp[2]+'_OPTM_map.json','w') as f:
         json.dump(dat, f)
 
 

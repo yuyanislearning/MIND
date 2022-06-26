@@ -144,9 +144,6 @@ def main(argv):
     tf.random.set_seed(FLAGS.random_seed)
     #tf.config.run_functions_eagerly(True)#TODO remove
 
-    # Load data
-    # cfg = yaml.load(open(FLAGS.config, 'r'), Loader=yaml.BaseLoader) #TODO
-
     data_prefix = '{}/PTM_'.format(
             FLAGS.data_path) 
     

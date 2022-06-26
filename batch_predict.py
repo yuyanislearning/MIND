@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 from sklearn.metrics import f1_score, precision_recall_curve, auc, roc_auc_score, accuracy_score, confusion_matrix, average_precision_score
-
+from os.path import exists
 
 
 import pdb
@@ -175,17 +175,24 @@ def main(argv):
         # for rec in tqdm(SeqIO.parse(fp, 'fasta')): # for every fasta contains phos true label
         #     sequence = str(rec.seq)
         #     uid = str(rec.id)
-    with open('/workspace/PTM/Data/OPTM/OPTM_filtered.json') as fp:
-        dat = json.load(fp)
+    # with open('/workspace/PTM/Data/OPTM/OPTM_filtered.json') as fp:
+    #     dat = json.load(fp)
     
     # for i in range(1):#place holder
-    with open('/workspace/PTM/Data/OPTM/nonoverlap_uid.txt') as f:    
-        for line in tqdm(f):
-            uid = line.strip()
-            sequence = dat[uid]['seq']
+    # with open('/workspace/PTM/Data/OPTM/nonoverlap_uid.txt') as f:    
+    #     for line in tqdm(f):
+    #             uid = line.strip()
+    #         sequence = dat[uid]['seq']
+
+
+    with open('/workspace/PTM/Data/Musite_data/fasta/bcaa.fasta', 'r') as fp:
+        for rec in SeqIO.parse(fp, 'fasta'):
+            uid = rec.id.split('|')[1]
+            sequence=str(rec.seq)
             records = cut_protein(sequence, FLAGS.seq_len)#
             # if line =='A0A087WPF7.fa':
             #     pdb.set_trace()
+            y_preds = {}
             for record in records:
                 seq = record['seq']
                 # idx = record['idx']
@@ -221,8 +228,8 @@ def main(argv):
                         ix = i+chunk_id*(FLAGS.seq_len-2)//2
                         y_preds[str(uid)+'_'+str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
 
-    with open('/workspace/PTM/Data/Musite_data/PTM_test/PTM_on_OPTMb.json','w') as fw:
-        json.dump(y_preds, fw)
+            with open('/workspace/PTM/Data/Musite_data/PTM_test/BCAA/'+uid+'.json','w') as fw:
+                json.dump(y_preds, fw)
 
     
 

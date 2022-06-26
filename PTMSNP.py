@@ -33,7 +33,8 @@ from src.model import TransFormerFixEmbed,  RNN_model, TransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
-model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3_15_fold_random_'#
+# model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3_15_fold_random'#
+model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3OPTM_r15'
 fold = 15
 
 
@@ -192,8 +193,11 @@ def main(argv):
     FLAGS = temp_flag()
     limit_gpu_memory_growth()
 
-    label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
-    'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+    # label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
+    # 'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+    label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
+        "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
+        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
     labels = list(label2aa.keys())
     # get unique labels
     unique_labels = sorted(set(labels))
@@ -207,101 +211,103 @@ def main(argv):
     
     models = [] # load models
     for i in range(fold):
-        models.append(tf.keras.models.load_model(model_name+'fold_'+str(i)))#
+        models.append(tf.keras.models.load_model(model_name+'_fold_'+str(i)))#
     # model = models[0]
     # emb_model = keras.models.Model(
     #     [models[0].inputs], [models[0].get_layer('encoder_layer').output]
     # )
     weights = ensemble_get_weights(AUPR_dat, unique_labels)
-    y_preds = {}
-    y_preds_mut = {}
-    uid = 'Q5S007'
-    snps = [("R","793","M"),("I","1122","V"),("S","1228","T"),("M","712","V"),("R","1723","P"),
-    ("R","1723","P"),("G","2019","S"),("I","2020","T"),("I","952","T"),("R","1628","P"),("G","2019","S"),
-    ("I","2020","T"),("Q","930","R"),("I","1122","V"),("R","1398","H"),("R","1441","C"),("R","1441","G"),
-    ("R","1441","H"),("M","1646","T"),("S","1647","T"),("N","2261","I"),("A","419","V"),("S","1283","T"),
-    ("Q","930","R"),("R","1398","H"),("R","1441","C"),("R","1441","C"),("R","1441","G"),("R","1441","G"),
-    ("R","1441","H"),("R","1441","H"),("T","2031","S"),("K","1359","I"),("I","1371","V"),("T","2031","S"),
-    ("T","2031","S"),("I","952","T"),("Q","930","R")]
-    with open('/workspace/PTM/Data/Musite_data/fasta/'+uid+'.fa') as ffast:
-        sequence = str(list(SeqIO.parse(ffast, 'fasta'))[0].seq)
-    # sequence = dat[uid]['seq']
-    for snp in snps:
-        SNP_site = int(snp[1])
-        SNP_var = snp[2]
-        SNP_wt = snp[0]
-        SNP_index = SNP_site-1
-        assert sequence[SNP_index]==SNP_wt
-        SNP_sequence = sequence[:SNP_index] + SNP_var + sequence[(SNP_index + 1):]
-        
-        records = cut_protein(sequence, FLAGS.seq_len, None)#label2aa[FLAGS.label] 
-
-        for record in records:
-            seq = record['seq']
-            chunk_id = record['chunk_id']
-
-            X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-            X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+    # SNPs = {'O94759':[('V','934','I')], 'P02649':[('C','130','R')], 'Q5S007':[('G','2019','S')],
+    # 'Q8TF76':[('V','76','E')],'Q96RQ3':[('H','464','P')],'Q9BSA9':[('M','393','T')],'Q9C0K1':[('A','391','T')]}
+    for uid in ['Q5S007']:#SNPs:
+        y_preds = {}
+        y_preds_mut = {}
+        # snps = SNPs[uid]
+        snps = [("M","712","V"),("R","793","M"),("Q","930","R"),("R","1067","Q"),("S","1096","C"),
+        ("I","1122","V"),("S","1228","T"),("I","1371","V"),("R","1441","C"),("R","1441","G"),("R","1441","H"),
+        ("R","1514","Q"),("P","1542","S"),("V","1598","E"),("Y","1699","C"),("R","1728","H"),("R","1728","L"),
+        ("M","1869","T"),("R","1941","H"),("I","2012","T"),("G","2019","S"),("I","2020","T"),("T","2031","S"),
+        ("T","2141","M"),("R","2143","H"),("D","2175","H"),("Y","2189","C"),("T","2356","I"),("G","2385","R"),
+        ("V","2390","M"),("L","2439","I"),("L","2466","H")]
+        with open('/workspace/PTM/Data/Musite_data/fasta/'+uid+'.fa') as ffast:
+            sequence = str(list(SeqIO.parse(ffast, 'fasta'))[0].seq)
+        # sequence = dat[uid]['seq']
+        for snp in snps:
+            SNP_site = int(snp[1])
+            SNP_var = snp[2]
+            SNP_wt = snp[0]
+            SNP_index = SNP_site-1
+            assert sequence[SNP_index]==SNP_wt
+            SNP_sequence = sequence[:SNP_index] + SNP_var + sequence[(SNP_index + 1):]
             
-            for j in range(fold):#fold
-                y_pred = models[j].predict(X)#*weights[ptm][j]                    
-                y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
-                temp_weight = np.array([weights[p][j] for p in weights])
-                y_pred = y_pred*temp_weight#TODO 
-                if j==0:
-                    y_pred_sum = y_pred
-                else:
-                    y_pred_sum += y_pred
+            records = cut_protein(sequence, FLAGS.seq_len, None)#label2aa[FLAGS.label] 
 
-            for ptm in label2aa.keys():
-                if chunk_id==0:
-                    cover_range = (0,quar_chunk_size*3)
-                elif chunk_id==((len(sequence)-1)//half_chunk_size-1):
-                    cover_range = (quar_chunk_size, len(sequence)-i*half_chunk_size)
-                else:
-                    cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
-                idx = [j for j in range(len((seq))) if (seq[j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
+            for record in records:
+                seq = record['seq']
+                chunk_id = record['chunk_id']
 
-                for i in idx:
-                    ix = i+chunk_id*(FLAGS.seq_len-2)//2+1
-                    y_preds[str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
+                X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
+                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                
+                for j in range(fold):#fold
+                    y_pred = models[j].predict(X)#*weights[ptm][j]                    
+                    y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
+                    temp_weight = np.array([weights[p][j] for p in weights])
+                    y_pred = y_pred*temp_weight#TODO 
+                    if j==0:
+                        y_pred_sum = y_pred
+                    else:
+                        y_pred_sum += y_pred
 
-        records = cut_protein(SNP_sequence, FLAGS.seq_len, None)#label2aa[FLAGS.label] 
+                for ptm in label2aa.keys():
+                    if chunk_id==0:
+                        cover_range = (0,quar_chunk_size*3)
+                    elif chunk_id==((len(sequence)-1)//half_chunk_size-1):
+                        cover_range = (quar_chunk_size, len(sequence)-i*half_chunk_size)
+                    else:
+                        cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
+                    idx = [j for j in range(len((seq))) if (seq[j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
 
-        for record in records:
-            seq = record['seq']
-            chunk_id = record['chunk_id']
+                    for i in idx:
+                        ix = i+chunk_id*(FLAGS.seq_len-2)//2+1
+                        y_preds[str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
 
-            X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-            X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-            
-            for j in range(fold):#fold
-                y_pred = models[j].predict(X)#*weights[ptm][j]                    
-                y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
-                temp_weight = np.array([weights[p][j] for p in weights])
-                y_pred = y_pred*temp_weight#TODO 
-                if j==0:
-                    y_pred_sum = y_pred
-                else:
-                    y_pred_sum += y_pred
+            records = cut_protein(SNP_sequence, FLAGS.seq_len, None)#label2aa[FLAGS.label] 
 
-            for ptm in label2aa.keys():
-                if chunk_id==0:
-                    cover_range = (0,quar_chunk_size*3)
-                elif chunk_id==((len(sequence)-1)//half_chunk_size-1):
-                    cover_range = (quar_chunk_size, len(sequence)-i*half_chunk_size)
-                else:
-                    cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
-                idx = [j for j in range(len((seq))) if (seq[j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
+            for record in records:
+                seq = record['seq']
+                chunk_id = record['chunk_id']
 
-                for i in idx:
-                    ix = i+chunk_id*(FLAGS.seq_len-2)//2 +1
-                    y_preds_mut[str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
+                X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
+                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                
+                for j in range(fold):#fold
+                    y_pred = models[j].predict(X)#*weights[ptm][j]                    
+                    y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
+                    temp_weight = np.array([weights[p][j] for p in weights])
+                    y_pred = y_pred*temp_weight#TODO 
+                    if j==0:
+                        y_pred_sum = y_pred
+                    else:
+                        y_pred_sum += y_pred
 
-        with open('/workspace/PTM/Data/PTMVar/res/'+uid+'_'+SNP_wt+str(SNP_site)+SNP_var+'.json','w') as fw:
-            json.dump(y_preds_mut, fw)
-    with open('/workspace/PTM/Data/PTMVar/res/'+uid+'.json','w') as fw:
-        json.dump(y_preds, fw)
+                for ptm in label2aa.keys():
+                    if chunk_id==0:
+                        cover_range = (0,quar_chunk_size*3)
+                    elif chunk_id==((len(sequence)-1)//half_chunk_size-1):
+                        cover_range = (quar_chunk_size, len(sequence)-i*half_chunk_size)
+                    else:
+                        cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
+                    idx = [j for j in range(len((seq))) if (seq[j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
+
+                    for i in idx:
+                        ix = i+chunk_id*(FLAGS.seq_len-2)//2 +1
+                        y_preds_mut[str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
+
+            with open('/workspace/PTM/Data/PTMVar/res/'+uid+'_'+SNP_wt+str(SNP_site)+SNP_var+'_OPTM.json','w') as fw:
+                json.dump(y_preds_mut, fw)
+        with open('/workspace/PTM/Data/PTMVar/res/'+uid+'_OPTM.json','w') as fw:
+            json.dump(y_preds, fw)
 
 # def main(argv):
 

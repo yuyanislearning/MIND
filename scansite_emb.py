@@ -272,6 +272,7 @@ def main(argv):
 
     embs = []
     kinases = []
+    seqs = []
     # get all the saliency scores
     for line in tqdm(fp): # for every fasta contains phos true label
         line = line.strip()
@@ -319,7 +320,9 @@ def main(argv):
                     if prob>0.5:#
                         embs.append(emb_grads)
                         kinases.append(site[1])
-    
+                        seqs.append(seq[seq_idx-10:seq_idx+11])
+                        if seq[seq_idx] not in 'ST':
+                            continue
     all_st_kinase = ['p38_Kin','CDK1_1','PLK1','Casn_Kin2','PKC_epsilon','DNA_PK','AuroA','PKC_zeta',\
         'PKC_common','GSK3_Kin','ATM_Kin','AMPK','PKA_Kin','Clk2_Kin','Cdc2_Kin','Cam_Kin2','GSK3b',\
             'Erk1_Kin','CDK1_2','Casn_Kin1','Akt_Kin','AuroB','PKC_delta','Cdk5_Kin','PKC_mu']
@@ -332,41 +335,43 @@ def main(argv):
     # all st kinase
     embs = tf.stack(embs, 0).numpy()
     kinases = np.array(kinases)
-    for kina in all_st_kinase:
-        select_index = [k for k,kin in enumerate(kinases) if kin in kina]
-        select_embs = embs[select_index,]
-        select_kinases = kinases[select_index,]
-        dist_plot(select_embs, 'analysis/figures/kinase_dist/'+kina+'.png', thres=3)
-        dist_plot2(select_embs, 'analysis/figures/kinase_dist/sum_'+kina+'.png')
+    seqs = np.array(seqs)
+    # for kina in all_st_kinase:
+    #     select_index = [k for k,kin in enumerate(kinases) if kin in kina]
+    #     select_embs = embs[select_index,]
+    #     select_kinases = kinases[select_index,]
+    #     dist_plot(select_embs, 'analysis/figures/kinase_dist/'+kina+'.png', thres=3)
+    #     dist_plot2(select_embs, 'analysis/figures/kinase_dist/sum_'+kina+'.png')
         # good shape: ATM_kin
 
     np.save('temp_0.5.npy', embs)
     np.save('temp_kin_0.5.npy', kinases)
-    select_index = [k for k,kin in enumerate(kinases) if kin in all_st_kinase]
-    select_embs = embs[select_index,]
-    select_kinases = kinases[select_index,]
+    np.save('temp_seq_0.5.npy', seqs)
+    # select_index = [k for k,kin in enumerate(kinases) if kin in all_st_kinase]
+    # select_embs = embs[select_index,]
+    # select_kinases = kinases[select_index,]
     
-    group_kinases = []
-    for kin in select_kinases:
-        if kin in acid_kinase:
-            group_kinases.append('Acidophilic')
-        elif kin in base_kinase:
-            group_kinases.append('Basophilic')
-        elif kin in DNA_damage_kinase:
-            group_kinases.append('DNA damage')
-        elif kin in pro_depend_kinase:
-            group_kinases.append('Proline-dependent')
+    # group_kinases = []
+    # for kin in select_kinases:
+    #     if kin in acid_kinase:
+    #         group_kinases.append('Acidophilic')
+    #     elif kin in base_kinase:
+    #         group_kinases.append('Basophilic')
+    #     elif kin in DNA_damage_kinase:
+    #         group_kinases.append('DNA damage')
+    #     elif kin in pro_depend_kinase:
+    #         group_kinases.append('Proline-dependent')
     
 
-    norm_embs = np.divide(embs,np.linalg.norm(embs, axis=1, keepdims=True))
-    smooth_embs = [smooth(emb,window_len=11,window='hanning') for emb in embs]
-    smooth_embs = np.stack(smooth_embs)
-    thres_embs = [thres(emb) for emb in embs]
-    thres_embs = np.stack(thres_embs)
-    tsne_plot(norm_embs, kinases, 'analysis/figures/kinase_emb_tsne.png')
-    pca_plot(norm_embs, kinases, 'analysis/figures/kinase_emb_pca.png')
-    tsne_plot(thres_embs, kinases, 'analysis/figures/kinase_emb_tsne.png',perplexity=5)
-    pca_plot(thres_embs, kinases, 'analysis/figures/kinase_emb_pca.png')
+    # norm_embs = np.divide(embs,np.linalg.norm(embs, axis=1, keepdims=True))
+    # smooth_embs = [smooth(emb,window_len=11,window='hanning') for emb in embs]
+    # smooth_embs = np.stack(smooth_embs)
+    # thres_embs = [thres(emb) for emb in embs]
+    # thres_embs = np.stack(thres_embs)
+    # tsne_plot(norm_embs, kinases, 'analysis/figures/kinase_emb_tsne.png')
+    # pca_plot(norm_embs, kinases, 'analysis/figures/kinase_emb_pca.png')
+    # tsne_plot(thres_embs, kinases, 'analysis/figures/kinase_emb_tsne.png',perplexity=5)
+    # pca_plot(thres_embs, kinases, 'analysis/figures/kinase_emb_pca.png')
 
 
 def dist_plot(embs, fig_path, thres=3):
