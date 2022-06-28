@@ -7,7 +7,6 @@ import os
 import sys
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_addons as tfa
 from datetime import datetime
 
 
@@ -149,8 +148,8 @@ def main(argv):
     
     # class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
     if not FLAGS.neg_sam:
-        # with open('/workspace/PTM/PTM-pattern-finder/analysis/res/class_weights.json','r') as f:
-        with open('/workspace/PTM/Data/OPTM/combined/class_weigth.json','r') as f:
+        with open(FLAGS.class_weight_fle,'r') as f:
+        # with open('/workspace/PTM/Data/OPTM/combined/class_weigth.json','r') as f:
             class_weights = json.load(f)
             lower = 1
             class_weights = {k:[class_weights[k][0]*lower,class_weights[k][1]] for k in class_weights}

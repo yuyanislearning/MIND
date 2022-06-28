@@ -680,6 +680,11 @@ class LSTMTransFormer(Raw_model):
 
         x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True, \
             ), name='lstm')(x)#kernel_regularizer=tf.keras.regularizers.L2(self.reg)
+            
+        x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
+        # x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-2' )([x, adj_input])
+
+
         x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
         pos_encoding = keras.layers.Input(shape=(None, self.d_model), name='input_pos_encoding')
         # x += pos_encoding #self.pos_encoding[:, :input_seq_len, :]
@@ -687,7 +692,7 @@ class LSTMTransFormer(Raw_model):
         x = self.dropout(x)#, training=training
 
         for i in range(self.num_layers):
-            x, block1 = self.enc_layers[i](x, mask, adj_input) if graph else self.enc_layers[i](x, mask)#, training
+            x, block1 = self.enc_layers[i](x, mask)#self.enc_layers[i](x, mask, adj_input) if graph else 
             attention_weights[f'encoder_layer{i+1}_block1'] = block1
 
 

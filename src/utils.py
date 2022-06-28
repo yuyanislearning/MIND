@@ -43,6 +43,9 @@ def handle_flags():
     flags.DEFINE_string('pretrain_name',
                 'PTM', 'name of pretrain model')  
     flags.DEFINE_string('suffix', '', 'model name suffix')
+    flags.DEFINE_string('class_weight_fle',
+            '/workspace/PTM/PTM-pattern-finder/analysis/res/class_weights.json', 'path to class weights')
+    
     
     # Model parameters. python run.py --data_path ..... --multilabel
     flags.DEFINE_bool("multilabel", True, "multilabel or not (default: True)")
@@ -122,6 +125,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         self.ensemble = FLAGS.ensemble
         self.random_ensemble = FLAGS.random_ensemble
         self.embedding = FLAGS.embedding
+        self.fill_cont = FLAGS.fill_cont
         if val:
             return None
 
@@ -227,7 +231,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         self.dat_len = len(self.uid)
         # get graph
         if self.graph:
-            get_graph(self.uid, self.X, self.num_cont , self.chunk_size, \
+            get_graph(self.uid, self.X, self.fill_cont , self.chunk_size, \
                 FLAGS.split_head, FLAGS.no_pdb,FLAGS.adj_dir, FLAGS.seq_len, FLAGS.twentyA)
 
         logging.info('Loaded {} records from {}.'.format(len(self.seq),file_name))
@@ -476,7 +480,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
             X = [X]
         
         if self.graph:
-            adjs = np.array([np.load('./temp/'+id+'_'+str(self.seq_len)+'_'+str(self.num_cont)+'.npy') for id in uid])
+            adjs = np.array([np.load('./temp/'+id+'_'+str(self.seq_len)+'_'+str(self.fill_cont)+'.npy') for id in uid])
             X.append(adjs)
         
         if 'Transformer' in self.model:
