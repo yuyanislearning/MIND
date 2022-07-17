@@ -95,11 +95,10 @@ def build_model(FLAGS, optimizer , unique_labels, binary=False):
         if FLAGS.pretrain:
             if FLAGS.pretrain_name=='PTM':
                 pretrain_name = 'saved_model/MLM_Transformer/Transformer_multi_514_all_PTM'
-            pretrain_model = tf.keras.models.load_model(pretrain_name)
-            for li in range(len(pretrain_model.layers)):
-                layer = pretrain_model.layers[li]
-                if layer.name not in ['my_last_dense', 'reshape',]:
-                    model.model.get_layer(index=li).set_weights(layer.get_weights())   
+            pretrain_model = tf.keras.models.load_model(FLAGS.pretrain_name)
+            for layer in pretrain_model.layers:
+                if len(layer.get_weights())!=0:
+                    model.model.get_layer(name=layer.name).set_weights(layer.get_weights())   
     return model   
 
 def save_model(model, FLAGS, fold=None):
@@ -142,10 +141,13 @@ def main(argv):
     np.random.seed(FLAGS.random_seed)
     tf.random.set_seed(FLAGS.random_seed)
     #tf.config.run_functions_eagerly(True)#TODO remove
-
-    data_prefix = '{}/PTM_'.format(
-            FLAGS.data_path) 
     
+    if FLAGS.dataset=='all':
+        data_prefix = '{}/PTM_'.format(
+                FLAGS.data_path)
+    else:
+        data_prefix = '{}/AF_PTM_'.format(FLAGS.data_path)
+
     # class_weights = get_class_weights(train_data, val_data, test_data, unique_labels) if FLAGS.class_weights else None
     if not FLAGS.neg_sam:
         with open(FLAGS.class_weight_fle,'r') as f:
@@ -169,15 +171,15 @@ def main(argv):
 
 
     optimizer = tf.keras.optimizers.Adam(
-            learning_rate=FLAGS.learning_rate, amsgrad=True)
+                        learning_rate=FLAGS.learning_rate, amsgrad=True)
 
-    # metrics = [CategoricalTruePositives(13,batch_size=FLAGS.batch_size)]#,tf.keras.metrics.FalsePositives(),
+        # metrics = [CategoricalTruePositives(13,batch_size=FLAGS.batch_size)]#,tf.keras.metrics.FalsePositives(),
     # tf.keras.metrics.TrueNegatives(),tf.keras.metrics.TruePositives()
      
     if FLAGS.multilabel:# multi-label      
         training_callbacks = [
             #keras.callbacks.ReduceLROnPlateau(patience = 1, factor = 0.25, min_lr = 1e-05, verbose = 1),
-            keras.callbacks.EarlyStopping(monitor='val_loss',patience = 25, restore_best_weights = True),
+            keras.callbacks.EarlyStopping(monitor='val_loss',patience = 20, restore_best_weights = True),
             #keras.metrics.Accuracy(),
         ] 
         if FLAGS.ensemble:
@@ -243,6 +245,16 @@ def main(argv):
             model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
                 lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
             logging.info('------------------evaluate---------------------' )
+            train_dat_aug = PTMDataGenerator(data_prefix+'train.json', FLAGS, shuffle=True,ind=None, eval=True, class_weights=class_weights)
+            AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,train_dat_aug, FLAGS.batch_size, unique_labels, \
+                FLAGS.graph, num_cont=FLAGS.fill_cont)
+            for u in unique_labels:
+                print('%.3f'%PR_AUC[u])
+            for u in unique_labels:
+                print(u)
+                print(confusion_matrixs[u])
+            if FLAGS.save_model:
+                save_model(model, FLAGS)                
             AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,test_dat_aug, FLAGS.batch_size, unique_labels, \
                 FLAGS.graph, num_cont=FLAGS.fill_cont)
 
