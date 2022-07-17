@@ -11,6 +11,7 @@ from tensorflow.keras.layers import Dense, Dropout
 # from tensorflow.python.ops import array_ops, math_ops
 from tensorflow.python.keras.utils import losses_utils
 
+import tf_geometric as tfg
 from tensorflow.python.eager import backprop
 
 from datetime import datetime
@@ -157,6 +158,83 @@ class Raw_model():
         y_preds = {ptm:np.concatenate(y_preds[ptm],axis=0) for ptm in y_preds}
                     
         return y_trues, y_preds
+
+
+
+class LSTMTransFormer(Raw_model):
+    def __init__(self, FLAGS,model_name,  optimizer,  num_layers, seq_len, num_heads, dff, rate, binary, unique_labels, split_head, global_heads, fill_cont):
+        Raw_model.__init__(self)
+        self.optimizer = optimizer
+        self.d_model = FLAGS.d_model
+        self.model_name = model_name
+        self.num_layers = num_layers
+        # max_seq_len = 35220
+        self.embedding = tf.keras.layers.Embedding(n_tokens, self.d_model, name='embedding')
+
+        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont)
+                        for _ in range(num_layers)]
+
+        self.dropout = tf.keras.layers.Dropout(rate)
+        self.binary = binary
+        self.unique_labels = unique_labels
+        self.reg = FLAGS.l2_reg
+
+    def create_model(self, seq_len, graph=False):
+        input_seq = keras.layers.Input(shape = (None,), dtype = np.int32, name = 'input-seq')
+        if graph:
+            adj_input = keras.layers.Input(shape=(None, None), name = 'input-adj', dtype=np.int32)
+        #seq_len = tf.shape(x)[1]
+        attention_weights = {}
+
+        mask = create_padding_mask(input_seq)
+        # adding embedding and position encoding.
+        x = self.embedding(input_seq)  # (batch_size, input_seq_len, d_model)
+        # x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm-2')(x)
+        # x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm-3')(x)
+
+        x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True, \
+            ), name='lstm')(x)#kernel_regularizer=tf.keras.regularizers.L2(self.reg)
+            
+        x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
+        # x = tfg.layers.GAT(self.d_model, num_heads=8, activation=tf.nn.relu)([x, adj_input])
+
+        x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
+        pos_encoding = keras.layers.Input(shape=(None, self.d_model), name='input_pos_encoding')
+        # x += pos_encoding #self.pos_encoding[:, :input_seq_len, :]
+
+        x = self.dropout(x)#, training=training
+
+        for i in range(self.num_layers):
+            x, block1 = self.enc_layers[i](x, mask)#self.enc_layers[i](x, mask, adj_input) if graph else 
+            attention_weights[f'encoder_layer{i+1}_block1'] = block1
+        # x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
+
+
+        out = layers.Dense(1, activation = 'sigmoid', name = 'my_last_dense')(x) if self.binary else layers.Dense(len(self.unique_labels), \
+             activation = 'sigmoid', name='my_last_dense')(x)#kernel_regularizer=tf.keras.regularizers.L2(self.reg),
+        #reg_loss = out.losses
+        if not self.binary: 
+            out = layers.Reshape((-1,1), name ='reshape')(out)
+
+        # return out, attention_weights  # (batch_size, input_seq_len, d_model)
+        # if not is_binary: 
+        #     out = layers.Reshape((-1,1), name ='reshape')(out)
+        # model_input = model.input
+        model = keras.models.Model(inputs = [input_seq, adj_input, pos_encoding] , outputs = out) if graph else keras.models.Model(inputs = [input_seq, pos_encoding] , outputs = out)
+        loss = keras.losses.BinaryCrossentropy(from_logits=False, reduction=losses_utils.ReductionV2.NONE) #+ reg_loss
+        # if self.MLM:
+        #     loss = keras.losses.CategoricalCrossentropy(from_logits=True, reduction=losses_utils.ReductionV2.NONE)
+        #model.build(input_seq)
+        self.model = model
+        print(model.summary())
+        # learning_rate = CustomSchedule(d_model) TODO
+        # optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98,
+        #                              epsilon=1e-9)
+        self.model.compile(
+            loss = loss,
+            optimizer = self.optimizer,
+            #run_eagerly=True,
+        )
 
 
 class RNN_model(Raw_model):
@@ -647,81 +725,6 @@ class TransFormerGAT(Raw_model):
 
 
 
-class LSTMTransFormer(Raw_model):
-    def __init__(self, FLAGS,model_name,  optimizer,  num_layers, seq_len, num_heads, dff, rate, binary, unique_labels, split_head, global_heads, fill_cont):
-        Raw_model.__init__(self)
-        self.optimizer = optimizer
-        self.d_model = FLAGS.d_model
-        self.model_name = model_name
-        self.num_layers = num_layers
-        # max_seq_len = 35220
-        self.embedding = tf.keras.layers.Embedding(n_tokens, self.d_model, name='embedding')
-
-        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont)
-                        for _ in range(num_layers)]
-
-        self.dropout = tf.keras.layers.Dropout(rate)
-        self.binary = binary
-        self.unique_labels = unique_labels
-        self.reg = FLAGS.l2_reg
-
-    def create_model(self, seq_len, graph=False):
-        input_seq = keras.layers.Input(shape = (None,), dtype = np.int32, name = 'input-seq')
-        if graph:
-            adj_input = keras.layers.Input(shape=(None, None), name = 'input-adj')
-        #seq_len = tf.shape(x)[1]
-        attention_weights = {}
-
-        mask = create_padding_mask(input_seq)
-        # adding embedding and position encoding.
-        x = self.embedding(input_seq)  # (batch_size, input_seq_len, d_model)
-        # x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm-2')(x)
-        # x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm-3')(x)
-
-        x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True, \
-            ), name='lstm')(x)#kernel_regularizer=tf.keras.regularizers.L2(self.reg)
-        
-        if graph:
-            x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
-        # x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-2' )([x, adj_input])
-
-
-        x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
-        pos_encoding = keras.layers.Input(shape=(None, self.d_model), name='input_pos_encoding')
-        # x += pos_encoding #self.pos_encoding[:, :input_seq_len, :]
-
-        x = self.dropout(x)#, training=training
-
-        for i in range(self.num_layers):
-            x, block1 = self.enc_layers[i](x, mask)#self.enc_layers[i](x, mask, adj_input) if graph else 
-            attention_weights[f'encoder_layer{i+1}_block1'] = block1
-
-
-        out = layers.Dense(1, activation = 'sigmoid', name = 'my_last_dense')(x) if self.binary else layers.Dense(len(self.unique_labels), \
-             activation = 'sigmoid', name='my_last_dense')(x)#kernel_regularizer=tf.keras.regularizers.L2(self.reg),
-        #reg_loss = out.losses
-        if not self.binary: 
-            out = layers.Reshape((-1,1), name ='reshape')(out)
-
-        # return out, attention_weights  # (batch_size, input_seq_len, d_model)
-        # if not is_binary: 
-        #     out = layers.Reshape((-1,1), name ='reshape')(out)
-        # model_input = model.input
-        model = keras.models.Model(inputs = [input_seq, adj_input, pos_encoding] , outputs = out) if graph else keras.models.Model(inputs = [input_seq, pos_encoding] , outputs = out)
-        loss = keras.losses.BinaryCrossentropy(from_logits=False, reduction=losses_utils.ReductionV2.NONE) #+ reg_loss
-        # if self.MLM:
-        #     loss = keras.losses.CategoricalCrossentropy(from_logits=True, reduction=losses_utils.ReductionV2.NONE)
-        #model.build(input_seq)
-        self.model = model
-        print(model.summary())
-        # learning_rate = CustomSchedule(d_model) TODO
-        # optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98,
-        #                              epsilon=1e-9)
-        self.model.compile(
-            loss = loss,
-            optimizer = self.optimizer,
-            #run_eagerly=True,
-        )
 
 
 class MLMTransFormer():

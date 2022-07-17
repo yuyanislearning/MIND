@@ -481,6 +481,14 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         
         if self.graph:
             adjs = np.array([np.load('./temp/'+id+'_'+str(self.seq_len)+'_'+str(self.fill_cont)+'.npy') for id in uid])
+            # graphs = []
+            # for id in uid:
+            #     adj = np.load('./temp/'+id+'_'+str(self.seq_len)+'_'+str(self.fill_cont)+'.npy')
+            #     graphs.append(adj)
+                # edge_index = adj2edge(adj)
+            # edge_indexs = np.expand_dims(np.array(edge_index),0)
+            # print(edge_indexs.shape)
+
             X.append(adjs)
         
         if 'Transformer' in self.model:
@@ -686,6 +694,9 @@ def get_class_weights(train_set, valid_set, test_set, unique_labels):
     class_weights = np.array([mean_w/u for u in class_weights])
     return class_weights
 
+def adj2edge(adj):
+    x,y = np.where(adj==1)
+    return np.stack(x,y)
 
 
 def tokenize_seqs(seqs):
