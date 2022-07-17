@@ -39,12 +39,12 @@ def handle_flags():
     flags.DEFINE_string('res_path',
             'res', 'path to result dir')
     flags.DEFINE_string('adj_dir',
-            '/workspace/PTM/Data/Musite_data/Structure/pdb/AF_cont_map/', 'path to structure adjency matrix')
+            '/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_cont_map/', 'path to structure adjency matrix')
     flags.DEFINE_string('pretrain_name',
                 'PTM', 'name of pretrain model')  
     flags.DEFINE_string('suffix', '', 'model name suffix')
     flags.DEFINE_string('class_weight_fle',
-            '/workspace/PTM/PTM-pattern-finder/analysis/res/class_weights.json', 'path to class weights')
+            '/local2/yuyan/PTM-Motif/PTM-pattern-finder/analysis/res/class_weights.json', 'path to class weights')
     
     
     # Model parameters. python run.py --data_path ..... --multilabel

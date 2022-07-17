@@ -680,8 +680,9 @@ class LSTMTransFormer(Raw_model):
 
         x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True, \
             ), name='lstm')(x)#kernel_regularizer=tf.keras.regularizers.L2(self.reg)
-            
-        x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
+        
+        if graph:
+            x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
         # x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-2' )([x, adj_input])
 
 
