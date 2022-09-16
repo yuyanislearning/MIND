@@ -4,8 +4,26 @@ import numpy as np
 from sklearn.metrics import average_precision_score
 from sklearn import metrics
 from sklearn.metrics import precision_recall_curve
+from os.path import exists
 
 from pprint import pprint
+
+in_dir = '/local2/yuyan/PTM-Motif/Data/Musite_data/PTM_test/eval/'
+suffix = 'con_g'
+graph = True
+sasa = True
+sasa_thres = 20
+sasa_prob_thres = 0.8
+OPTM=False
+
+with open(in_dir+suffix+'.json') as f:
+    predict_dat = json.load(f)
+if not OPTM:
+    with open('/local2/yuyan/PTM-Motif/Data/Musite_data/ptm/PTM_test.json') as f:#
+        dat = json.load(f)
+else:
+    with open('/local2/yuyan/PTM-Motif/Data/OPTM/PTM_test.json') as f:
+        dat = json.load(f)   
 
 ptm2ptm = {'O-linked_glycosylation':'glyco_ST', 'S-palmitoyl_cysteine':'Palm_C','Hydroxyproline':'Hydro_P',\
     'Pyrrolidone_carboxylic_acid':'Pyro_Q','Phosphoserine':'Phos_ST', 'Hydroxylysine':'Hydro_K',\
@@ -13,11 +31,14 @@ ptm2ptm = {'O-linked_glycosylation':'glyco_ST', 'S-palmitoyl_cysteine':'Palm_C',
     'SUMOylation':'SUMO_K','Methylarginine':'Methy_R','Phosphotyrosine':'Phos_Y',\
     'N-linked_glycosylation':'glyco_N','Phosphothreonine':'Phos_ST'}
 
-# label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
-#         'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
-label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
-        "Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
-        "Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}# "ProCH_P":"P","Lys-OH_K":"K", 
+if not OPTM:
+    label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
+    'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+else:
+    label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
+        "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
+        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
+
 
 y_preds = {}
 AUPRs = {}
@@ -26,24 +47,39 @@ precisions = {}
 recalls = {}
 f1s = {}
 MCCs = {}
-
-with open('/workspace/PTM/Data/Musite_data/PTM_test/OPTM_test_res.json') as f:
-    predict_dat = json.load(f)
-
-with open('/workspace/PTM/Data/OPTM/PTM_test.json') as f:
-    dat = json.load(f)
+AS_dict = {}
 
 for sptm in predict_dat:
     uid = sptm.split('_')[0]
     site = int(sptm.split('_')[1])
     ptm_type = sptm.split('_')[2]+'_'+sptm.split('_')[3]
     if y_preds.get(uid,-1)==-1:
-        y_preds[uid] = [(site, ptm_type, predict_dat[sptm])]
+        if sasa:
+            if exists('/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_updated_freesasa/'+uid+'_freesasa.npy'):
+                sas = np.load('/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_updated_freesasa/'+uid+'_freesasa.npy')
+                
+                neg = np.where(sas< sasa_thres)[0]
+            else:
+                neg = []
+            AS_dict[uid] = neg
+            if site in neg and float(predict_dat[sptm])<sasa_prob_thres:
+                y_preds[uid] = [(site, ptm_type, 0)]
+            else:
+                y_preds[uid] = [(site, ptm_type, predict_dat[sptm])]
+        else:
+            y_preds[uid] = [(site, ptm_type, predict_dat[sptm])]
     else:
-        y_preds[uid].append((site, ptm_type, predict_dat[sptm]))
+        if sasa:
+            if site in AS_dict[uid] and float(predict_dat[sptm])<sasa_prob_thres:
+                y_preds[uid].append((site, ptm_type, 0))
+            else:
+                y_preds[uid].append((site, ptm_type, predict_dat[sptm]))
+        else:
+            y_preds[uid].append((site, ptm_type, predict_dat[sptm]))
 
 y_trues_all = []
 y_pred_all = []
+
 for ptm in label2aa.keys():#['Hydro_K', 'Hydro_P', 'Methy_K', 'Methy_R']:
     y_trues = []
     predictions = []
@@ -93,33 +129,33 @@ pred_label_all[np.where(y_pred_all>0.5)] = 1
 fpr, tpr, thresholds = metrics.roc_curve(y_trues_all, y_pred_all)
 
 
-print("AUPR")
+# print("AUPR")
 print('%.3f'%(average_precision_score(y_trues_all, y_pred_all)))
 AUPR_ls = [AUPRs[ptm] for ptm in AUPRs]
 print('%.3f'%(sum(AUPR_ls)/len(AUPR_ls)))
 
-print("AUC")
+# print("AUC")
 print('%.3f'%(metrics.auc(fpr, tpr)))
 AUC_ls = [AUCs[ptm] for ptm in AUCs]
 print('%.3f'%(sum(AUC_ls)/len(AUC_ls)))
 
-print("precisions")
+# print("precisions")
 print('%.3f'%(metrics.precision_score(y_trues_all, pred_label_all)))
 pr_ls = [precisions[ptm] for ptm in precisions]
 print('%.3f'%(sum(pr_ls)/len(pr_ls)))
 
 
-print("recalls")
+# print("recalls")
 print('%.3f'%(metrics.recall_score(y_trues_all, pred_label_all)))
 recall_ls = [recalls[ptm] for ptm in recalls]
 print('%.3f'%(sum(recall_ls)/len(recall_ls)))
 
-print("f1s")
+# print("f1s")
 print('%.3f'%(metrics.f1_score(y_trues_all, pred_label_all)))
 f1_ls = [f1s[ptm] for ptm in f1s]
 print('%.3f'%(sum(f1_ls)/len(f1_ls)))
 
-print("MCCs")
+# print("MCCs")
 print('%.3f'%(metrics.matthews_corrcoef(y_trues_all, pred_label_all)))
 MCC_ls = [MCCs[ptm] for ptm in MCCs]
 print('%.3f'%(sum(MCC_ls)/len(MCC_ls)))

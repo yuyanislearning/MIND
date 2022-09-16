@@ -22,32 +22,17 @@ import pandas as pd
 
 import pdb
 
-from src.utils import get_class_weights,  limit_gpu_memory_growth, PTMDataGenerator
+from src.utils import get_class_weights,  limit_gpu_memory_growth, handle_flags
 from src import utils
-from src.model import TransFormerFixEmbed,  RNN_model, TransFormer
+from src.model import TransFormerFixEmbed,  RNN_model, LSTMTransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
-
-def handle_flags():
-    flags.DEFINE_string('model_path',
-            'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3_fold_0', 'pretrained model path to load ')
-    flags.DEFINE_string('data_path', './', 'path to fasta data')#268 Ubi_K
-    flags.DEFINE_string('protein', 'P58871', 'protein uid')
-    flags.DEFINE_string('res_path','test', 'path to result dir')
-    flags.DEFINE_string('adj_path', '', 'path to structure adjency matrix')
-    flags.DEFINE_string("label", 'Phos_ST', "what ptm label")
-
-    # Model parameters.
-    flags.DEFINE_bool("graph", False, "use only spatially and locally close sequence (default: False)")#TODO
-    flags.DEFINE_bool("ensemble", False, "ensemble learning")#TODO
-
-    # Training parameters.
-    flags.DEFINE_integer("seq_len", 514, "maximum lenth+2 of the model sequence (default: 512)")
-    flags.DEFINE_integer("d_model", 128, "hidden dimension of the model")
-    flags.DEFINE_integer("seq_idx", 1131, "hidden dimension of the model")
-
-    FLAGS = flags.FLAGS
+model_name = 'saved_model/con_g'
+fold = 1
+prob_thres = 0.8
+handle_flags()
+ensemble=False
 
 
 def cut_protein(sequence, seq_len, aa):
@@ -81,12 +66,28 @@ def cut_protein(sequence, seq_len, aa):
             })
     else:
         records.append({
-            'chunk_id': 0,
+            'chunk_id': None,
             'seq': sequence,
             'idx': [j for j in range(len((sequence))) if sequence[j] in aa]
         })
     return records
 
+
+def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
+    if FLAGS.model=='LSTMTransformer':
+        model = LSTMTransFormer(FLAGS,FLAGS.model,optimizer,  \
+            num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=False,\
+            unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
+        for layer in pretrain_model.layers:
+            if len(layer.get_weights())!=0 and layer.name!='my_last_dense' and layer.name!='embedding':
+                if layer.name=='encoder_layer':
+                    model.model.get_layer(name='encoder_layer_0').set_weights(layer.get_weights())
+                else:
+                    model.model.get_layer(name=layer.name).set_weights(layer.get_weights())   
+
+    print(model.model.summary())
+    return model   
 
 def interpolate_emb( emb, alphas, seq_idx, baseline_med='blank', baseline=None):
     # interpolate embedding and baseline
@@ -129,7 +130,7 @@ def get_baseline(emb, baseline_med, seq_idx, baseline=None):
     return tile_emb
 
 
-def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=None, method=None, emb=None, baseline=None):
+def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=None, method=None, emb=None, baseline=None, graph=None):
     """Computes the gradients of outputs w.r.t input embedding.
 
     Args:
@@ -154,6 +155,8 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
         return tf.math.sqrt(tf.math.reduce_mean(tf.math.square(grads), axis = -1)).numpy()
 
     if method == 'integrated_gradient':
+        # test is pred is > pred_thres
+        
         # batching since it's too big
         alpha, seq_len, dim = embedding.shape[0]//21, embedding.shape[1],embedding.shape[2]
         embedding = tf.reshape(embedding, (alpha, 21, seq_len, dim))
@@ -164,25 +167,25 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
                 tape.watch(embed)
                 temp_X = [ tf.tile(x, tf.constant([alpha]+(len(x.shape)-1)*[1])) for x in X] + [embed] # tile sequence x to match emb
                 out_pred = grad_model(temp_X)
+                out_pred = tf.reshape(out_pred, (51, -1, 13))
                 top_class = out_pred[:,seq_idx, top_pred_idx]
                 
-
             grads = tape.gradient(top_class, embed) # (alpha, seq, dim)
             grads = (grads[:-1] + grads[1:]) / tf.constant(2.0) # calculate integration
             integrated_grads = tf.math.reduce_mean(grads, axis = 0) * (emb[i,:,:] - baseline[i,:,:])  # integration
             final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-10+i, :], axis=-1).numpy()) #norm of the specific aa
 
-        return np.array(final_grads), top_class[-1]
+        return np.array(final_grads)
 
 def heatmap(a, highlight_idx, fle):
     fig, ax = plt.subplots(figsize=(10,5), layout='constrained')
-    a = np.squeeze(a)
-    ax.plot(list(range(-7,8,1)), a)
-    ax.scatter(0, a[7], 50, facecolors='none', edgecolors='black', linewidths=1.5)
-    # ax = sns.heatmap(a)
-    
-    # sns.lineplot(list(range(len(a))), a)
-    # plt.plot(highlight_idx, a[highlight_idx], markersize=29, fillstyle='none', markeredgewidth=1.5)
+
+    std = np.std(a, axis=0)
+    ttt = np.squeeze(np.mean(a, axis=0))
+    ax.plot(list(range(-7,8,1)), ttt)
+    ax.scatter(0, ttt[7], 50, facecolors='none', edgecolors='black', linewidths=1.5)
+    ax.fill_between(list(range(-7,8,1)), (ttt-std), (ttt+std), color='b', alpha=.1)
+        
     plt.show()
     plt.savefig(fle)
     plt.close()
@@ -248,109 +251,154 @@ def dist_plot(embs, fig_path, thres=3):
     plt.close()
 
 
-handle_flags()
+
 def main(argv):
     FLAGS = flags.FLAGS
     limit_gpu_memory_growth()
 
-    # label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
-    # 'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
-    label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
-        "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
-        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
+    label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
+    'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+    # label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
+    #     "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
+    #     "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
     labels = list(label2aa.keys())
     # get unique labels
     unique_labels = sorted(set(labels))
     label_to_index = {str(label): i for i, label in enumerate(unique_labels)}
     index_to_label = {i: str(label) for i, label in enumerate(unique_labels)}
 
-    model = tf.keras.models.load_model(FLAGS.model_path)
+    model = tf.keras.models.load_model(model_name)
     
     emb_model = keras.models.Model(
         [model.inputs], [model.get_layer('embedding').output]
     )
+    optimizer = tf.keras.optimizers.Adam(
+                        learning_rate=FLAGS.learning_rate, amsgrad=True)
+    grad_model = build_model_graph(FLAGS, optimizer , unique_labels, model).model
     
-    model_cls = TransFormerFixEmbed( FLAGS.d_model,  num_layers=3, num_heads=8, dff=512, rate=0.1,\
-        split_head=False, global_heads=None, fill_cont=None,lstm=True)
-    grad_model = model_cls.create_model()
-    for layer in model.layers:
-        if layer.name not in ['embedding', 'reshape'] and 'dropout' not in layer.name:
-            grad_model.get_layer(layer.name).set_weights(layer.get_weights())
-    
+
     chunk_size = FLAGS.seq_len - 2
 
-    with open('/workspace/PTM/Data/OPTM/OPTM_filtered.json') as f:
-        dat = json.load(f)
+    # with open('/local2/yuyan/PTM-Motif/Data/OPTM/OPTM_filtered.json') as f:
+    #     dat = json.load(f)
+    with open('/local2/yuyan/PTM-Motif/Data/Musite_data/Phosphorylation_motif/correct_scan_kinase.json') as f:
+        scan = json.load(f)
+
     
-    for ptm_type in label2aa:
+
+    ptm_type = 'Phos_ST'
+    for kin_type in ['CDK1_1']:
+        seqs = []
         all_saliency = []
-        for k in tqdm(dat):
-            sequence = dat[k]['seq']
-            records = cut_protein(sequence, FLAGS.seq_len, label2aa[ptm_type])
-            label = dat[k]['label']
+        optm_count = 0
+        protein_count = 0
+        fp =  open('/local2/yuyan/PTM-Motif/Data/Musite_data/Phosphorylation_motif/all_phos_uid.txt', 'r')
+        for line in tqdm(fp): # for every fasta contains phos true label
+            line = line.strip()
+            P_exist=False
+            with open('/local2/yuyan/PTM-Motif/Data/Musite_data/fasta/'+line) as fr:
+                fa = list(SeqIO.parse(fr, 'fasta'))[0]
+            sequence = str(fa.seq)
+            uid = str(fa.id)
+            if '|' in uid:
+                uid = uid.split('|')[1]
+            records = cut_protein(sequence, FLAGS.seq_len, 'STY')#label2aa[FLAGS.label] 
 
-            preds = {}
-            for record in records:
-                seq = record['seq']
-                idx = record['idx']
-                chunk_id = record['chunk_id']
+            for site in scan[uid]:
+                if site[1]!=kin_type:
+                    continue
+                
+        # for k in tqdm(dat):
+            # P_exist=False
+            # sequence = dat[k]['seq']
+            # records = cut_protein(sequence, FLAGS.seq_len, label2aa[ptm_type])
+            # label = dat[k]['label']
 
-                X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                preds = {}
+                for record in records:
+                    seq = record['seq']
+                    idx = record['idx']
+                    chunk_id = record['chunk_id']
+                    if chunk_id is None:
+                        name_id = ''
+                        chunk_id = 0
+                    else:
+                        name_id = '~'+str(chunk_id)
 
-                if chunk_id==0:
-                    cover_range = (0,chunk_size//4*3)
-                elif chunk_id==((len(sequence)-1)//-1):
-                    cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
-                else:
-                    cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
+                    adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
+                    adj = np.expand_dims(adj, 0)
+                    X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
+                    X = [tf.expand_dims(X, 0),adj, tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
 
-                for l in label:
-                    seq_idx = l['site']
+                    if chunk_id==0:
+                        cover_range = (0,chunk_size//4*3)
+                    elif chunk_id==((len(sequence)-1)//-1):
+                        cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
+                    else:
+                        cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
+
+                    seq_idx = site[0]
                     # only get gradient when the seq_idx fall in the range
-                    if seq_idx >=cover_range[0] and seq_idx < cover_range[1] and l['ptm_type']==ptm_type:
+                    if seq_idx+1 >=cover_range[0] and seq_idx+1 < cover_range[1]:
                         # get gradient for specific ptm
                         seq_idx = seq_idx - chunk_id*chunk_size//2 +1# padding for zero-based
                         # emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], seq_idx,method='gradient')
                         fig_name = 'figs/'+'temp'#'_'.join([FLAGS.protein,str(FLAGS.seq_idx), FLAGS.label])
                         # heatmap(emb_grads, seq_idx, fle=(fig_name+'_gradient.png', fig_name+'_local_gradient.png'))
+                        
+                        pred_score =  model(X).numpy()
+                        pred_score = pred_score.reshape(1, -1,13)
+                        if pred_score[0, seq_idx+1, label_to_index[ptm_type]] < prob_thres:
+                            continue
+                        temp_seq = seq[seq_idx-7:seq_idx+8]
+                        if len(temp_seq)==15:
+                            seqs.append(temp_seq)
 
                         # get intergrated gradient for specific ptm
                         emb = emb_model(X)
                         m_steps = 50
                         alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
-                        pad_baseline = [tf.expand_dims(['<PAD>']*FLAGS.seq_len, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                        # pad_baseline = [tf.expand_dims(['<PAD>']*FLAGS.seq_len, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
                         # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                        interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx)
+                        interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1)
                         #TODO try <PAD>
                         if interpolated_emb is None:
                             continue
-                        emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[ptm_type], \
-                            seq_idx, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
+                        emb_grads= get_gradients(X, emb_model, grad_model, label_to_index[ptm_type], \
+                            seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
                         w_size = 7
-                        if prob.numpy() > 0.8 and seq_idx-w_size >= 0 and seq_idx+w_size <=512:
-                            emb_grads = np.squeeze(emb_grads)
-                            left = seq_idx-w_size
-                            right = seq_idx+w_size+1
-                            # if left <0:
-                            #     left = 0
-                            # else:
-                            #     seq_idx=w_size
-                            # if right > len(emb_grads):
-                            #     right=len(emb_grads)
-                            emb_grads = emb_grads[3:18]
-                            all_saliency.append(emb_grads)
-        if len(all_saliency)==0:
-            print('no ptm predicted for '+ ptm_type)
-            continue
+                    
+                        emb_grads = np.squeeze(emb_grads)
+                        left = seq_idx-w_size
+                        right = seq_idx+w_size+1
+                        # if left <0:
+                        #     left = 0
+                        # else:
+                        #     seq_idx=w_size
+                        # if right > len(emb_grads):
+                        #     right=len(emb_grads)
+                        emb_grads = emb_grads[3:18]
+                        all_saliency.append(emb_grads)
+                        optm_count+=1
+                        P_exist=True
+                if P_exist:
+                    protein_count+=1
+                if len(all_saliency)==0:
+                    print('no ptm predicted for '+ ptm_type)
+                    continue
+        print(optm_count)
+        print(protein_count)
         all_saliency = np.stack(all_saliency,axis=0)
         norm_sal = np.divide(all_saliency,np.linalg.norm(all_saliency, axis=1, keepdims=True))
-        norm_sal = np.sum(norm_sal,axis=0)
+        # norm_sal = np.sum(norm_sal,axis=0)
         heatmap(norm_sal,25, 
-            '/workspace/PTM/Data/OPTM/pattern/'+ptm_type+'_local.pdf')
-        dist_plot(all_saliency, '/workspace/PTM/Data/OPTM/pattern/'+ptm_type+'_dist.pdf', thres=3)
-        np.save('/workspace/PTM/Data/OPTM/pattern/'+ptm_type+'.npy', all_saliency) 
-
+            '/local2/yuyan/PTM-Motif/Data/OPTM/pattern/'+kin_type+'_local.pdf')
+        # dist_plot(all_saliency, '/local2/yuyan/PTM-Motif/Data/OPTM/pattern/'+ptm_type+'_dist.pdf', thres=3)
+        np.save('/local2/yuyan/PTM-Motif/Data/OPTM/pattern/'+kin_type+'.npy', all_saliency) 
+        with open('/local2/yuyan/PTM-Motif/Data/OPTM/pattern/'+ptm_type+'_seq.txt','w') as fw:
+            for single_seq in seqs:
+                fw.write(single_seq+'\n')
+        # pdb.set_trace()
         # heatmap(emb_grads, seq_idx, fle=(fig_name+'_integrated_gradient.png',fig_name+'_local_integrated_gradient.png'))
     # pprint(preds) Q3SYY2 342 glyco_N
 

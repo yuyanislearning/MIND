@@ -11,8 +11,8 @@ from tensorflow.python.keras.engine import data_adapter
 import pdb
 
 class EncoderLayer(tf.keras.layers.Layer):
-    def __init__(self, d_model, num_heads, dff, rate=0.1, split_head=None, global_heads=None, fill_cont=None):
-        super(EncoderLayer, self).__init__()
+    def __init__(self, d_model, num_heads, dff, rate=0.1, split_head=None, global_heads=None, fill_cont=None, name=None):
+        super(EncoderLayer, self).__init__(name=name)
 
         self.mha = MultiHeadAttention(d_model, num_heads, split_head, global_heads, fill_cont)
         self.ffn = point_wise_feed_forward_network(d_model, dff)
@@ -262,6 +262,26 @@ def local_attention(q, k, v, mask, graph_mask, fill_cont):
 
     return output, attention_weights
 
+
+class graph_seq_attn(tf.keras.layers.Layer):
+    def __init__(self, d_model ):
+        super(graph_seq_attn, self).__init__()
+
+        self.w1 = layers.Dense(d_model, activation = 'tanh', name = 'seq_weight')
+        self.w2 = layers.Dense(d_model, activation = 'tanh', name = 'graph_weight')
+        self.w = layers.Dense(1, activation = 'linear', name = 'attn_wei')
+
+    def call(self, seq, graph):
+
+        seq_rep = tf.expand_dims(self.w(self.w1(seq)),axis=-1) # (batch, seq_len, 1)
+        graph_rep = tf.expand_dims(self.w(self.w2(graph)),axis=-1) #(batch, seq_len, 1)
+
+        alpha = tf.concat((seq_rep, graph_rep), axis=-1, name='concat_a')#(batch, seq_len, 2)
+        alpha = tf.nn.softmax(alpha, axis=-1)
+        alpha_seq, alpha_graph = tf.unstack(alpha, axis=-1)
+
+        return tf.multiply(alpha_seq, seq) + tf.multiply(alpha_graph, graph)
+
 def _mask_invalid_locations(input_tensor, window_overlap):
     # create correct upper triangle bool mask
     mask_2d_upper = tf.reverse(
@@ -350,7 +370,7 @@ def scaled_dot_product_attention(q, k, v, mask, graph_mask):
         # head_size = q.shape[1]
         # graph_mask = tf.expand_dims(graph_mask, axis=1)
         # graph_mask = tf.tile(graph_mask, tf.constant([1,head_size,1,1],tf.int32))
-        scaled_attention_logits += (-1e3 * (graph_mask[:,tf.newaxis, :,:]+mask))
+        scaled_attention_logits += (-1e3 * (1-graph_mask[:,tf.newaxis, :,:]))
     else:
         scaled_attention_logits += (mask * -1e3)
 

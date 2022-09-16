@@ -11,7 +11,6 @@ from tensorflow.keras.layers import Dense, Dropout
 # from tensorflow.python.ops import array_ops, math_ops
 from tensorflow.python.keras.utils import losses_utils
 
-import tf_geometric as tfg
 from tensorflow.python.eager import backprop
 
 from datetime import datetime
@@ -32,7 +31,7 @@ import sys
 # import importlib.util
 
 # from src.utils import PTMDataGenerator, get_graph
-from src.transformer import positional_encoding, EncoderLayer, create_padding_mask
+from src.transformer import positional_encoding, EncoderLayer, create_padding_mask, graph_seq_attn
 
 sys.path.append("/workspace/PTM/protein_bert/")
 sys.path.append('/workspace/PTM/transformers/src/')
@@ -60,8 +59,10 @@ class Raw_model():
         #     aug = PTMDataGenerator( encoded_train_set, seq_len,model=self.model_name, batch_size=len(aug.list_id), unique_labels=unique_labels, graph = graph,shuffle=True, binary=binary, ind=ind, eval=False, num_cont=num_cont, d_model=self.d_model)
         # if batch_size > len(val_aug.list_id) and len(val_aug.list_id)!=0:
         #     val_aug = PTMDataGenerator( encoded_valid_set, seq_len,model=self.model_name, batch_size=len(val_aug.list_id), unique_labels=unique_labels, graph = graph,shuffle=True, binary=binary, ind=ind, eval=True, num_cont=num_cont, d_model=self.d_model)
-        self.model.fit(aug,  epochs = n_epochs, steps_per_epoch=aug.__len__(), validation_data = val_aug, callbacks = callbacks)#, validation_steps=val_aug.__len__())
-
+        if val_aug is not None:
+            self.model.fit(aug,  epochs = n_epochs, steps_per_epoch=aug.__len__(), validation_data = val_aug, callbacks = callbacks)#, validation_steps=val_aug.__len__())
+        else:
+            self.model.fit(aug,  epochs = n_epochs, steps_per_epoch=aug.__len__(),  callbacks = callbacks)#, validation_steps=val_aug.__len__())
 
     def eval(self, seq_len,aug, batch_size, unique_labels,graph=False, binary=False, ind=None, num_cont=None):
         # aug = PTMDataGenerator( test_data, seq_len,model=self.model_name, batch_size=batch_size, unique_labels=unique_labels, graph = graph,shuffle=False, binary=binary, ind=ind, num_cont=num_cont, d_model=self.d_model, eval=True)#test_data.Y.shape[0]
@@ -99,6 +100,7 @@ class Raw_model():
                 y_preds.append(y_pred)
             else:
                 for i in range(len(unique_labels)):
+                    
                     y_true = y_true_all[:,:,i]
                     y_pred = y_pred_all[:,:,i]
                     y_mask = y_mask_all[:,:,i]
@@ -117,6 +119,7 @@ class Raw_model():
         else:
             y_trues = {ptm:np.concatenate(y_trues[ptm],axis=0) for ptm in y_trues}
             y_preds = {ptm:np.concatenate(y_preds[ptm],axis=0) for ptm in y_preds}
+            
             for i in range(len(unique_labels)):
                 # print(y_trues[ptm_type[i]])
                 AUC[ptm_type[i]] = roc_auc_score(y_trues[ptm_type[i]], y_preds[ptm_type[i]])
@@ -168,12 +171,16 @@ class LSTMTransFormer(Raw_model):
         self.d_model = FLAGS.d_model
         self.model_name = model_name
         self.num_layers = num_layers
+        self.FLAGS=FLAGS
         # max_seq_len = 35220
         self.embedding = tf.keras.layers.Embedding(n_tokens, self.d_model, name='embedding')
 
-        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont)
-                        for _ in range(num_layers)]
-
+        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont, name='encoder_layer_'+str(n_l))
+                        for n_l in range(num_layers)]
+        if FLAGS.dt:
+            self.enc_g = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont, name='graph_trans_encoder-'+str(n_l))
+                        for n_l in range(1)]
+        self.graph_seq_attn = graph_seq_attn(self.d_model)
         self.dropout = tf.keras.layers.Dropout(rate)
         self.binary = binary
         self.unique_labels = unique_labels
@@ -181,38 +188,64 @@ class LSTMTransFormer(Raw_model):
 
     def create_model(self, seq_len, graph=False):
         input_seq = keras.layers.Input(shape = (None,), dtype = np.int32, name = 'input-seq')
-        if graph:
+        if graph and not self.FLAGS.gt:
             adj_input = keras.layers.Input(shape=(None, None), name = 'input-adj', dtype=np.int32)
+        if self.FLAGS.gt:
+            adj_input = keras.layers.Input(shape = (None, 20), name  ='graph_encoding')
         #seq_len = tf.shape(x)[1]
         attention_weights = {}
 
         mask = create_padding_mask(input_seq)
+        
         # adding embedding and position encoding.
         x = self.embedding(input_seq)  # (batch_size, input_seq_len, d_model)
-        # x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm-2')(x)
-        # x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm-3')(x)
+        if self.FLAGS.inter:
+            my_emb = keras.layers.Input(shape = (None,128),  name = 'given_embed')
+            x = my_emb
+
+        if self.FLAGS.node:
+            input_node = keras.layers.Input(shape=(None, 15),dtype=np.float32, name='input-node')
+            x = tf.concat((x, input_node),axis=-1)
+        
+        if self.FLAGS.sasa:
+            sasa_input = keras.layers.Input(shape = (None, 1), name='sasa_feature')            
+            x = tf.concat((x, sasa_input), axis=-1)
 
         x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True, \
             ), name='lstm')(x)#kernel_regularizer=tf.keras.regularizers.L2(self.reg)
-            
-        x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
+        if self.FLAGS.gt:
+            x = tf.concat((x, adj_input),axis=-1)            
+        
+        if graph and not (self.FLAGS.dt or self.FLAGS.gt):
+            graph_x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
+            # graph_x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-2' )([graph_x, adj_input])
+            # graph_x = GCNConv(channels=self.d_model, dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
         # x = tfg.layers.GAT(self.d_model, num_heads=8, activation=tf.nn.relu)([x, adj_input])
+        # x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm-2')(x)
 
-        x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
+        # x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
         pos_encoding = keras.layers.Input(shape=(None, self.d_model), name='input_pos_encoding')
         # x += pos_encoding #self.pos_encoding[:, :input_seq_len, :]
 
-        x = self.dropout(x)#, training=training
+        # x = self.dropout(x)#, training=training
 
+        if self.FLAGS.dt:
+            for i in range(1):
+                g_x, block1 = self.enc_g[i](x, mask, )
         for i in range(self.num_layers):
             x, block1 = self.enc_layers[i](x, mask)#self.enc_layers[i](x, mask, adj_input) if graph else 
             attention_weights[f'encoder_layer{i+1}_block1'] = block1
         # x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-1' )([x, adj_input])
+        if graph and not (self.FLAGS.dt or self.FLAGS.gt):
+            # graph_x = GATConv(channels=self.d_model//8, attn_heads=8,dropout_rate=0.5, activation='relu', name='gcn-2' )([graph_x, adj_input])
+            # x = self.graph_seq_attn(x, graph_x)
+            x = tf.concat((x, graph_x), axis=-1)
 
-
+        if self.FLAGS.dt:
+            x = tf.concat((x,g_x), axis=-1)
         out = layers.Dense(1, activation = 'sigmoid', name = 'my_last_dense')(x) if self.binary else layers.Dense(len(self.unique_labels), \
              activation = 'sigmoid', name='my_last_dense')(x)#kernel_regularizer=tf.keras.regularizers.L2(self.reg),
-        #reg_loss = out.losses
+        
         if not self.binary: 
             out = layers.Reshape((-1,1), name ='reshape')(out)
 
@@ -220,7 +253,19 @@ class LSTMTransFormer(Raw_model):
         # if not is_binary: 
         #     out = layers.Reshape((-1,1), name ='reshape')(out)
         # model_input = model.input
-        model = keras.models.Model(inputs = [input_seq, adj_input, pos_encoding] , outputs = out) if graph else keras.models.Model(inputs = [input_seq, pos_encoding] , outputs = out)
+        model_input = [input_seq]
+        if graph:
+            model_input.append(adj_input)
+        if self.FLAGS.node:
+            model_input.append(input_node)
+        if self.FLAGS.sasa:
+            model_input.append(sasa_input)
+
+
+        model_input.append(pos_encoding)
+        if self.FLAGS.inter:
+            model_input.append(my_emb)
+        model = keras.models.Model(inputs = model_input , outputs = out) 
         loss = keras.losses.BinaryCrossentropy(from_logits=False, reduction=losses_utils.ReductionV2.NONE) #+ reg_loss
         # if self.MLM:
         #     loss = keras.losses.CategoricalCrossentropy(from_logits=True, reduction=losses_utils.ReductionV2.NONE)
@@ -235,6 +280,49 @@ class LSTMTransFormer(Raw_model):
             optimizer = self.optimizer,
             #run_eagerly=True,
         )
+
+
+
+class TransFormerFixEmbed():
+    def __init__(self, d_model,  num_layers, num_heads, dff, rate, split_head, global_heads, fill_cont, lstm=False):
+        self.d_model = d_model
+        self.num_layers = num_layers
+        self.lstm = lstm
+        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont)
+                        for _ in range(num_layers)]
+
+        self.linear = keras.layers.Dense(self.d_model)
+        self.dropout = tf.keras.layers.Dropout(rate)
+
+    def create_model(self, graph=False):
+        input_seq = keras.layers.Input(shape = (None,), dtype = np.int32, name = 'input-seq')
+        my_emb = keras.layers.Input(shape = (None,128),  name = 'given_embed')
+        if graph:
+            adj_input = keras.layers.Input(shape=(None, None), name = 'input-adj')
+        attention_weights = {}
+
+        x = my_emb
+        mask = create_padding_mask(input_seq)
+        
+        x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm')(x)
+        x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
+        pos_encoding = keras.layers.Input(shape=(None, self.d_model), name='input_pos_encoding')
+        x += pos_encoding #self.pos_encoding[:, :input_seq_len, :]
+        
+        # x = self.dropout(x)#, training=training
+
+        for i in range(self.num_layers):
+            x, block1 = self.enc_layers[i](x, mask, adj_input) if graph else self.enc_layers[i](x, mask)#, training
+            attention_weights[f'encoder_layer{i+1}_block1'] = block1
+
+        self.attention_weights = attention_weights
+        # x = self.fnn2(x)
+        # x = tf.nn.leaky_relu(x, alpha=0.01)
+        out = layers.Dense(13, activation = 'sigmoid', name='my_last_dense')(x)
+
+        model = keras.models.Model(inputs = [input_seq, adj_input, pos_encoding, my_emb] , outputs = out) if graph else keras.models.Model(inputs = [input_seq, pos_encoding, my_emb] , outputs = out)
+
+        return model
 
 
 class RNN_model(Raw_model):
@@ -788,47 +876,6 @@ class MLMTransFormer():
         )
 
 
-
-class TransFormerFixEmbed():
-    def __init__(self, d_model,  num_layers, num_heads, dff, rate, split_head, global_heads, fill_cont, lstm=False):
-        self.d_model = d_model
-        self.num_layers = num_layers
-        self.lstm = lstm
-        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont)
-                        for _ in range(num_layers)]
-
-        self.linear = keras.layers.Dense(self.d_model)
-        self.dropout = tf.keras.layers.Dropout(rate)
-
-    def create_model(self, graph=False):
-        input_seq = keras.layers.Input(shape = (None,), dtype = np.int32, name = 'input-seq')
-        my_emb = keras.layers.Input(shape = (None,128),  name = 'given_embed')
-        if graph:
-            adj_input = keras.layers.Input(shape=(None, None), name = 'input-adj')
-        attention_weights = {}
-
-        x = my_emb
-        mask = create_padding_mask(input_seq)
-        if self.lstm:
-            x = layers.Bidirectional(layers.LSTM(self.d_model//2,  return_sequences=True), name='lstm')(x)
-        x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
-        pos_encoding = keras.layers.Input(shape=(None, self.d_model), name='input_pos_encoding')
-        x += pos_encoding #self.pos_encoding[:, :input_seq_len, :]
-        
-        # x = self.dropout(x)#, training=training
-
-        for i in range(self.num_layers):
-            x, block1 = self.enc_layers[i](x, mask, adj_input) if graph else self.enc_layers[i](x, mask)#, training
-            attention_weights[f'encoder_layer{i+1}_block1'] = block1
-
-        self.attention_weights = attention_weights
-        # x = self.fnn2(x)
-        # x = tf.nn.leaky_relu(x, alpha=0.01)
-        out = layers.Dense(13, activation = 'sigmoid', name='my_last_dense')(x)
-
-        model = keras.models.Model(inputs = [input_seq, adj_input, pos_encoding, my_emb] , outputs = out) if graph else keras.models.Model(inputs = [input_seq, pos_encoding, my_emb] , outputs = out)
-
-        return model
 
 class ProtTrans(Raw_model):
     def __init__(self, optimizer_class, loss_object, unique_labels,lr,  binary=None, short=None):

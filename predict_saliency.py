@@ -18,36 +18,19 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
-
-
 import pdb
 
-from src.utils import get_class_weights,  limit_gpu_memory_growth, PTMDataGenerator
+from src.utils import get_class_weights,  limit_gpu_memory_growth, handle_flags
 from src import utils
-from src.model import TransFormerFixEmbed,  RNN_model, TransFormer
+from src.model import TransFormerFixEmbed,  RNN_model, LSTMTransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
-
-def handle_flags():
-    flags.DEFINE_string('model_path',
-            'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3_fold_0', 'pretrained model path to load ')
-    flags.DEFINE_string('data_path', './', 'path to fasta data')#268 Ubi_K
-    flags.DEFINE_string('protein', 'P58871', 'protein uid')
-    flags.DEFINE_string('res_path','test', 'path to result dir')
-    flags.DEFINE_string('adj_path', '', 'path to structure adjency matrix')
-    flags.DEFINE_string("label", 'Phos_ST', "what ptm label")
-
-    # Model parameters.
-    flags.DEFINE_bool("graph", False, "use only spatially and locally close sequence (default: False)")#TODO
-    flags.DEFINE_bool("ensemble", False, "ensemble learning")#TODO
-
-    # Training parameters.
-    flags.DEFINE_integer("seq_len", 514, "maximum lenth+2 of the model sequence (default: 512)")
-    flags.DEFINE_integer("d_model", 128, "hidden dimension of the model")
-    flags.DEFINE_integer("seq_idx", 1131, "hidden dimension of the model")
-
-    FLAGS = flags.FLAGS
+model_name = 'saved_model/con_g'
+fold = 1
+prob_thres = 0.8
+handle_flags()
+ensemble=False
 
 
 def cut_protein(sequence, seq_len, aa):
@@ -81,19 +64,31 @@ def cut_protein(sequence, seq_len, aa):
             })
     else:
         records.append({
-            'chunk_id': 0,
+            'chunk_id': None,
             'seq': sequence,
             'idx': [j for j in range(len((sequence))) if sequence[j] in aa]
         })
     return records
 
+def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
+    if FLAGS.model=='LSTMTransformer':
+        model = LSTMTransFormer(FLAGS,FLAGS.model,optimizer,  \
+            num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=False,\
+            unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
+        for layer in pretrain_model.layers:
+            if len(layer.get_weights())!=0 and layer.name!='my_last_dense' and layer.name!='embedding':
+                if layer.name=='encoder_layer':
+                    model.model.get_layer(name='encoder_layer_0').set_weights(layer.get_weights())
+                else:
+                    model.model.get_layer(name=layer.name).set_weights(layer.get_weights())   
 
-handle_flags()
+    print(model.model.summary())
+    return model   
+
 def main(argv):
-
     FLAGS = flags.FLAGS
     limit_gpu_memory_growth()
-
 
     label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
     'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
@@ -103,31 +98,28 @@ def main(argv):
     label_to_index = {str(label): i for i, label in enumerate(unique_labels)}
     index_to_label = {i: str(label) for i, label in enumerate(unique_labels)}
 
-    model = tf.keras.models.load_model(FLAGS.model_path)
+    model = tf.keras.models.load_model(model_name)
     
     emb_model = keras.models.Model(
         [model.inputs], [model.get_layer('embedding').output]
     )
+    optimizer = tf.keras.optimizers.Adam(
+                        learning_rate=FLAGS.learning_rate, amsgrad=True)
+    grad_model = build_model_graph(FLAGS, optimizer , unique_labels, model).model
     
-    model_cls = TransFormerFixEmbed( FLAGS.d_model,  num_layers=3, num_heads=8, dff=512, rate=0.1,\
-        split_head=False, global_heads=None, fill_cont=None,lstm=True)
-    grad_model = model_cls.create_model()
-    for layer in model.layers:
-        if layer.name not in ['embedding', 'reshape'] and 'dropout' not in layer.name:
-            grad_model.get_layer(layer.name).set_weights(layer.get_weights())
-    
+
     chunk_size = FLAGS.seq_len - 2
 
     if True:
         kin_name = 'CDK1_1'
-        with open('/workspace/PTM/Data/Musite_data/Phosphorylation_motif/correct_scan_kinase.json') as fk:
+        with open('/local2/yuyan/PTM-Motif/Data/Musite_data/Phosphorylation_motif/correct_scan_kinase.json') as fk:
             scan = json.load(fk)
         zero_locals = []
         for uid in scan:
             for kin in scan[uid]:
-                if kin[1]==kin_name and uid =='O77562':           
-                    site = kin[0]-1
-                    with open('/workspace/PTM/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
+                if kin[1]==kin_name: #and uid =='A0A096MK47':           
+                    site = kin[0]
+                    with open('/local2/yuyan/PTM-Motif/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
                         # data structure: {PID:{seq, label:[{site, ptm_type}]}}
                         sequence = str(list(SeqIO.parse(fp, 'fasta'))[0].seq)
                         records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])
@@ -136,10 +128,21 @@ def main(argv):
                         seq = record['seq']
                         idx = record['idx']
                         chunk_id = record['chunk_id']
+                        if chunk_id is None:
+                            name_id = ''
+                            chunk_id = 0
+                        else:
+                            name_id = '~'+str(chunk_id)
+                        if FLAGS.graph:
+                            adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
+                            adj = np.expand_dims(adj, 0)
 
                         X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-                        X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-
+                        if FLAGS.graph:
+                            X = [tf.expand_dims(X, 0),adj, tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                        else:
+                            X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                        
                         if chunk_id==0:
                             cover_range = (0,chunk_size//4*3)
                         elif chunk_id==((len(sequence)-1)//-1):
@@ -151,23 +154,33 @@ def main(argv):
                         if site >=cover_range[0] and site < cover_range[1]:
                             # get gradient for specific ptm
                             seq_idx = site - chunk_id*chunk_size//2 
-                            fig_name = 'figs/'+'_'.join([uid,str(site), 'Phos_ST'])
+                            kin_name = kin[1]
+                            temp_label = 'Phos_ST' if seq[seq_idx] in 'ST' else 'Phos_Y'
+                            pred_score =  model(X).numpy()
+                            pred_score = pred_score.reshape(1, -1,13)
+                            
+                            if pred_score[0, seq_idx+1, label_to_index[temp_label]] < prob_thres:
+                                continue
+                            print(pred_score[0, seq_idx+1, label_to_index[temp_label]])
+                            fig_name = 'figs/con_g/'+'_'.join([uid,str(site), 'Phos_ST'])
                             emb = emb_model(X)
                             m_steps = 50
                             alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
                             # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
                             # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
                             # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                            interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx)
-                            emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], \
-                                seq_idx, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
-                            if prob>0.9:
-                                zero_local = heatmap(emb_grads, 7, fle=(fig_name+'_'+kin_name+'_local_integrated_gradient.pdf'))
-                                zero_locals.append(zero_local)
+                            interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1)
+                            if interpolated_emb is None:
+                                continue
+                            emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[temp_label], \
+                                seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
+                            # if prob>0.9:
+                            zero_local = heatmap(emb_grads, 7, fle=(fig_name+'_'+kin_name+str(FLAGS.graph)+'.pdf'))
+                            zero_locals.append(zero_local)
     # elif True:
     #     site = 2345
     #     uid = 'A2AJK6'
-    #     with open('/workspace/PTM/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
+    #     with open('/local2/yuyan/PTM-Motif/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
     #         # data structure: {PID:{seq, label:[{site, ptm_type}]}}
     #         sequence = str(list(SeqIO.parse(fp, 'fasta'))[0].seq)
     #     SNP1_sequence = sequence[:1441] + 'C' + sequence[(1441 + 1):]
@@ -221,7 +234,7 @@ def main(argv):
     #                 zero_local = heatmap(emb_grads, seq_idx, fle=(fig_name+fig_add_name[j]+'_integrated_gradient.pdf',fig_name+fig_add_name[j]+'_local_integrated_gradient.pdf'))
                 
     else:
-        with open('/workspace/PTM/Data/Musite_data/ptm/PTM_test.json') as f:
+        with open('/local2/yuyan/PTM-Motif/Data/Musite_data/ptm/PTM_test.json') as f:
             dat = json.load(f)
         
         for ptm_type in label2aa:
@@ -271,6 +284,8 @@ def main(argv):
                             pad_baseline = [tf.expand_dims(['<PAD>']*FLAGS.seq_len, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
                             # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
                             interpolated_emb, baseline = interpolate_emb(emb, alphas)
+                            if interpolated_emb is None:
+                                continue
                             #TODO try <PAD>
                             emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[ptm_type], \
                                 seq_idx, interpolated_emb, method='integrated_gradient', emb=emb, baseline=baseline)
@@ -303,7 +318,6 @@ def interpolate_emb( emb, alphas, seq_idx, baseline_med='blank', baseline=None):
     # baseline_x = tf.reshape(baseline_x, (len(alphas)*21, seq_len, dim))
     return embs, baseline
 
-
 def get_baseline(emb, baseline_med, seq_idx, baseline=None):
     if seq_idx-10<0 or seq_idx+11>emb.shape[1]:
         return None
@@ -321,7 +335,8 @@ def get_baseline(emb, baseline_med, seq_idx, baseline=None):
     tile_emb = tf.convert_to_tensor(tile_emb)
     return tile_emb
 
-def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=None, method=None, emb=None, baseline=None):
+
+def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=None, method=None, emb=None, baseline=None, graph=None):
     """Computes the gradients of outputs w.r.t input embedding.
 
     Args:
@@ -346,6 +361,8 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
         return tf.math.sqrt(tf.math.reduce_mean(tf.math.square(grads), axis = -1)).numpy()
 
     if method == 'integrated_gradient':
+        # test is pred is > pred_thres
+        
         # batching since it's too big
         alpha, seq_len, dim = embedding.shape[0]//21, embedding.shape[1],embedding.shape[2]
         embedding = tf.reshape(embedding, (alpha, 21, seq_len, dim))
@@ -356,17 +373,17 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
                 tape.watch(embed)
                 temp_X = [ tf.tile(x, tf.constant([alpha]+(len(x.shape)-1)*[1])) for x in X] + [embed] # tile sequence x to match emb
                 out_pred = grad_model(temp_X)
+                out_pred = tf.reshape(out_pred, (51, -1, 13))
                 top_class = out_pred[:,seq_idx, top_pred_idx]
                 
 
             grads = tape.gradient(top_class, embed) # (alpha, seq, dim)
             grads = (grads[:-1] + grads[1:]) / tf.constant(2.0) # calculate integration
-
             integrated_grads = tf.math.reduce_mean(grads, axis = 0) * (emb[i,:,:] - baseline[i,:,:])  # integration
             final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-10+i, :], axis=-1).numpy()) #norm of the specific aa
 
-        return np.array(final_grads), top_class[-1]
-        
+        return np.array(final_grads)
+
 def heatmap(a, highlight_idx, fle):
     a = a[3:18]
     fig, ax = plt.subplots(figsize=(10,5), layout='constrained')

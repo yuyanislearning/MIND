@@ -31,10 +31,27 @@ from src.transformer import  positional_encoding
 
 # model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3OPTM_r15'
 # model_name = 'saved_model/CNN/CNN_514_multin_layer_3CNN_36912/'
-model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3_15_fold_random'
+suffix = 'OPTM_fifthteen'
+model_name = 'saved_model/' + suffix
 fold = 15
 avg_weight = False
 
+graph = False
+alpha_shape = False
+AS_filter = False
+OPTM=True
+fasta_file = '/local2/yuyan/PTM-Motif/PTM-pattern-finder/predict/JC/JC.fasta'
+
+if not OPTM:
+    label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
+    'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+    dat_dir = '/local2/yuyan/PTM-Motif/Data/Musite_data/ptm/PTM_test.json'
+    # dat_dir ='temp.json'
+else:
+    label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
+        "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
+        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
+    dat_dir = '/local2/yuyan/PTM-Motif/Data/OPTM/PTM_test.json'
 
 # change it here
 class temp_flag():
@@ -55,40 +72,6 @@ class temp_flag():
         self.embedding = embedding
         self.n_fold = n_fold
 
-def predict(model,seq_len,aug, batch_size, unique_labels, binary=False):
-    # predict cases
-    ptm_type = {i:p for i, p in enumerate(unique_labels)}
-
-    if binary:# TODO add or remove binary
-        y_trues = []
-        y_preds = []
-    else:
-        y_trues = {ptm_type[i]:[] for i in ptm_type}#{ptm_type:np.array:(n_sample,1)}
-        y_preds = {ptm_type[i]:[] for i in ptm_type}
-
-    for test_X,test_Y,test_sample_weights in aug:
-        y_pred = model.predict(test_X, batch_size=batch_size)
-        # seq_len = test_X[0].shape[1]
-        if not binary:
-            y_mask = test_sample_weights.reshape(-1, seq_len, len(unique_labels))
-            y_true = test_Y.reshape(-1, seq_len, len(unique_labels))
-            y_pred = y_pred.reshape(-1, seq_len, len(unique_labels))
-            for i in range(len(unique_labels)):
-                y_true_i = y_true[:,:,i]
-                y_pred_i = y_pred[:,:,i]
-                y_mask_i = y_mask[:,:,i]
-
-                y_true_i = y_true_i[y_mask_i==1]
-                y_pred_i = y_pred_i[y_mask_i==1]
-                y_trues[ptm_type[i]].append(y_true_i)
-                y_preds[ptm_type[i]].append(y_pred_i)
-        else:
-            y_mask = test_sample_weights
-            y_true = test_Y
-    y_trues = {ptm:np.concatenate(y_trues[ptm],axis=0) for ptm in y_trues}
-    y_preds = {ptm:np.concatenate(y_preds[ptm],axis=0) for ptm in y_preds}
-                
-    return y_trues, y_preds    
 
 def ensemble_get_weights(PR_AUCs, unique_labels):
     weights = {ptm:None for ptm in unique_labels}
@@ -116,7 +99,7 @@ def cut_protein(sequence, seq_len):
             max_seq_ind = (i+2)*half_chunk_size
             if i==0:
                 cover_range = (0,quar_chunk_size*3)
-            elif i==((len(sequence)-1)//half_chunk_size-1):
+            elif i==((len(sequence)-1)//half_chunk_size):
                 cover_range = (quar_chunk_size, len(sequence)-i*half_chunk_size)
                 max_seq_ind = len(sequence)
             else:
@@ -130,7 +113,7 @@ def cut_protein(sequence, seq_len):
             })
     else:
         records.append({
-            'chunk_id': 0,
+            'chunk_id': None,
             'seq': sequence,
             # 'idx': [j for j in range(len((sequence))) if sequence[j] in aa]
         })
@@ -142,12 +125,8 @@ def main(argv):
     FLAGS = temp_flag()
     limit_gpu_memory_growth()
 
+    # tf.config.run_functions_eagerly(True)
 
-    label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
-    'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
-    # label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
-    #     "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
-    #     "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
     labels = list(label2aa.keys())
     # get unique labels
     unique_labels = sorted(set(labels))
@@ -162,6 +141,7 @@ def main(argv):
     models = [] # load models
     for i in range(fold):#
         models.append(tf.keras.models.load_model(model_name+'_fold_'+str(i)))
+    # model = tf.keras.models.load_model(model_name)
 
     weights = ensemble_get_weights(AUPR_dat, unique_labels)
 
@@ -175,61 +155,111 @@ def main(argv):
         # for rec in tqdm(SeqIO.parse(fp, 'fasta')): # for every fasta contains phos true label
         #     sequence = str(rec.seq)
         #     uid = str(rec.id)
-    # with open('/workspace/PTM/Data/OPTM/OPTM_filtered.json') as fp:
-    #     dat = json.load(fp)
-    
+
+        
     # for i in range(1):#place holder
     # with open('/workspace/PTM/Data/OPTM/nonoverlap_uid.txt') as f:    
     #     for line in tqdm(f):
     #             uid = line.strip()
     #         sequence = dat[uid]['seq']
-
-
-    with open('/workspace/PTM/Data/Musite_data/fasta/bcaa.fasta', 'r') as fp:
-        for rec in SeqIO.parse(fp, 'fasta'):
+    y_preds = {}
+    seqs = []
+    chunk_ids = []
+    uids = []
+    pad_Xs = []
+    adjs = []
+    sequences = []
+    count=0
+    if fasta_file is not None:
+        with open(fasta_file, 'r') as fp:
+            dat = list(SeqIO.parse(fp, 'fasta'))            
+        for dat_count, rec in tqdm(enumerate(dat)):
             uid = rec.id.split('|')[1]
             sequence=str(rec.seq)
-            records = cut_protein(sequence, FLAGS.seq_len)#
+            records = cut_protein(sequence, FLAGS.seq_len)
+
+    # else:
+    #     for dat_count, uid in tqdm(enumerate(dat)):
+    #         sequence = dat[uid]['seq']
+    #         records = cut_protein(sequence, FLAGS.seq_len)#
             # if line =='A0A087WPF7.fa':
             #     pdb.set_trace()
-            y_preds = {}
             for record in records:
+                count+=1
                 seq = record['seq']
                 # idx = record['idx']
                 chunk_id = record['chunk_id']
-
+                seqs.append(seq)
+                chunk_ids.append(chunk_id)
                 X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                pad_Xs.append(X)
+                uids.append(uid)
+                sequences.append(sequence)
+                # X = [tf.expand_dims(X, 0)] 
+                if graph:
+                    g_suffix = '_AS' if alpha_shape else ''
+                    id = uid + '~' + str(chunk_id) if len(records)>1 else uid
+                    adj = np.load('./temp/'+id+'_'+str(FLAGS.seq_len)+'_5'+g_suffix+'.npy', allow_pickle=True) 
+                    adjs.append(adj)
+                if count<64 and dat_count!=len(dat)-1:
+                    continue
+                pad_Xs = np.stack(pad_Xs, axis=0)
+                X = [pad_Xs]
+                if graph:
+                    adjs = np.stack(adjs, axis=0)
+                    X.append(adjs)
                 
-                for j in range(fold):#fold
-                    y_pred = models[j].predict(X)#*weights[ptm][j]                    
-                    y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
-                    if avg_weight:
-                        temp_weight = 1/fold
-                    else:
-                        temp_weight = np.array([weights[p][j] for p in weights])
-                    y_pred = y_pred*temp_weight#TODO 
-                    if j==0:
-                        y_pred_sum = y_pred
-                    else:
-                        y_pred_sum += y_pred
+                
+                batch_size = pad_Xs.shape[0]
+                X.append(np.zeros((batch_size, 514, 128)))
+                
+                if fold>0:
+                    for j in range(fold):#fold 
+                        y_pred = models[j](X)#*weights[ptm][j]                    
+                        y_pred = tf.reshape(y_pred, (batch_size, FLAGS.seq_len, -1)).numpy()
+                        if avg_weight:
+                            temp_weight = 1/fold
+                        else:
+                            temp_weight = np.array([weights[p][j] for p in weights])
+                        y_pred = y_pred*temp_weight#TODO 
+                        if j==0:
+                            y_pred_sum = y_pred
+                        else:
+                            y_pred_sum += y_pred
+                else:
+                    y_pred = model(X)
+                    y_pred_sum = y_pred.numpy().reshape(batch_size, FLAGS.seq_len, -1)
+
+
 
                 for ptm in label2aa.keys():
-                    if chunk_id==0:
-                        cover_range = (0,quar_chunk_size*3)
-                    elif chunk_id==((len(sequence)-1)//half_chunk_size-1):
-                        cover_range = (quar_chunk_size, len(sequence)-i*half_chunk_size)
-                    else:
-                        cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
-                    idx = [j for j in range(len((seq))) if (seq[j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
+                    for ch in range(batch_size):
 
-                    # idx = [j for j in range(len((seq))) if seq[j] in label2aa[ptm]]
-                    for i in idx:
-                        ix = i+chunk_id*(FLAGS.seq_len-2)//2
-                        y_preds[str(uid)+'_'+str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
+                        if chunk_ids[ch]==0:#TODO
+                            cover_range = (0,quar_chunk_size*3)
+                        elif chunk_ids[ch]==((len(sequences[ch])-1)//half_chunk_size-1):
+                            cover_range = (quar_chunk_size, len(seqs[ch]))
+                        elif chunk_ids[ch] is None:
+                            cover_range = (0,515)
+                            chunk_ids[ch] = 0
+                        else:
+                            cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
+                        idx = [j for j in range(len((seqs[ch]))) if (seqs[ch][j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
 
-            with open('/workspace/PTM/Data/Musite_data/PTM_test/BCAA/'+uid+'.json','w') as fw:
-                json.dump(y_preds, fw)
+                        # idx = [j for j in range(len((seq))) if seq[j] in label2aa[ptm]]
+                        for i in idx:
+                            ix = i+chunk_ids[ch]*(FLAGS.seq_len-2)//2
+                            y_preds[str(uids[ch])+'_'+str(ix)+'_'+ptm] = str(y_pred_sum[ch, i+1,label_to_index[ptm]])
+
+                seqs = []
+                chunk_ids = []
+                uids = []
+                pad_Xs = []
+                adjs = []
+                count=0
+
+        with open('/local2/yuyan/PTM-Motif/Data/Musite_data/PTM_test/eval/'+suffix+'_JC.json','w') as fw:
+            json.dump(y_preds, fw)
 
     
 

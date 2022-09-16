@@ -39,54 +39,54 @@ class MyCustomCallback(tf.keras.callbacks.Callback):
         tf.keras.backend.clear_session()
 
 def build_model(FLAGS, optimizer , unique_labels, binary=False):
-    if FLAGS.model=='RNN':
-        model = RNN_model()
-        model.create_model(FLAGS.model, optimizer, FLAGS.seq_len, 128, unique_labels, 0.6, is_binary=binary, \
-            graph=FLAGS.graph, n_lstm=FLAGS.n_lstm, n_gcn=FLAGS.n_gcn)
-    elif FLAGS.model=='CNN':
-        model = CNN_model()  
-        model.create_model(FLAGS.model, optimizer, FLAGS.seq_len,is_binary=binary, unique_labels=unique_labels)
-    elif FLAGS.model=='GAT':
-        model = GAT_model()
-        model.create_model(FLAGS.model, optimizer, FLAGS.n_lstm, FLAGS.seq_len, is_binary=binary, \
-            unique_labels=unique_labels,d_hidden_seq=128, dropout=0.6)
-    elif FLAGS.model=='Transformer':
-        model = TransFormer(FLAGS, FLAGS.model,optimizer,  \
-            num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
-            unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
-        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
-        if FLAGS.pretrain:
-            if FLAGS.pretrain_name=='PTM':
-                pretrain_name = 'saved_model/MLM_Transformer/Transformer_multi_514_all_PTM_1'
-            pretrain_model = tf.keras.models.load_model(pretrain_name)
-            for li in range(len(pretrain_model.layers)):
-                layer = pretrain_model.layers[li]
-                if layer.name not in ['my_last_dense', 'reshape',]:
-                    model.model.get_layer(index=li).set_weights(layer.get_weights())
-    elif FLAGS.model=='CustomTransformer':
-        model = CustomTransFormer(FLAGS.model,optimizer,  d_model=128, \
-            num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
-            unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
-        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
-    elif FLAGS.model=='Transformer_CNN':
-        model = TransFormer_CNN(FLAGS.model,optimizer,  d_model=128, \
-            num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
-            unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
-        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)                        
-    elif FLAGS.model=='TransformerGAT':
-        model = TransFormerGAT(FLAGS.model,optimizer,  d_model=128, \
-            num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
-            unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
-        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
-        if FLAGS.pretrain:
-            if FLAGS.pretrain_name=='PTM':
-                pretrain_name = 'saved_model/MLM_Transformer/Transformer_multi_514_all_PTM'
-            pretrain_model = tf.keras.models.load_model(pretrain_name)
-            for li in range(len(pretrain_model.layers)):
-                layer = pretrain_model.layers[li]
-                if layer.name not in ['my_last_dense', 'reshape',]:
-                    model.model.get_layer(index=li).set_weights(layer.get_weights())   
-    elif FLAGS.model=='LSTMTransformer':
+    # if FLAGS.model=='RNN':
+    #     model = RNN_model()
+    #     model.create_model(FLAGS.model, optimizer, FLAGS.seq_len, 128, unique_labels, 0.6, is_binary=binary, \
+    #         graph=FLAGS.graph, n_lstm=FLAGS.n_lstm, n_gcn=FLAGS.n_gcn)
+    # elif FLAGS.model=='CNN':
+    #     model = CNN_model()  
+    #     model.create_model(FLAGS.model, optimizer, FLAGS.seq_len,is_binary=binary, unique_labels=unique_labels)
+    # elif FLAGS.model=='GAT':
+    #     model = GAT_model()
+    #     model.create_model(FLAGS.model, optimizer, FLAGS.n_lstm, FLAGS.seq_len, is_binary=binary, \
+    #         unique_labels=unique_labels,d_hidden_seq=128, dropout=0.6)
+    # elif FLAGS.model=='Transformer':
+    #     model = TransFormer(FLAGS, FLAGS.model,optimizer,  \
+    #         num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
+    #         unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+    #     model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
+    #     if FLAGS.pretrain:
+    #         if FLAGS.pretrain_name=='PTM':
+    #             pretrain_name = 'saved_model/MLM_Transformer/Transformer_multi_514_all_PTM_1'
+    #         pretrain_model = tf.keras.models.load_model(pretrain_name)
+    #         for li in range(len(pretrain_model.layers)):
+    #             layer = pretrain_model.layers[li]
+    #             if layer.name not in ['my_last_dense', 'reshape',]:
+    #                 model.model.get_layer(index=li).set_weights(layer.get_weights())
+    # elif FLAGS.model=='CustomTransformer':
+    #     model = CustomTransFormer(FLAGS.model,optimizer,  d_model=128, \
+    #         num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
+    #         unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+    #     model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
+    # elif FLAGS.model=='Transformer_CNN':
+    #     model = TransFormer_CNN(FLAGS.model,optimizer,  d_model=128, \
+    #         num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
+    #         unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+    #     model.create_model(FLAGS.seq_len, graph=FLAGS.graph)                        
+    # elif FLAGS.model=='TransformerGAT':
+    #     model = TransFormerGAT(FLAGS.model,optimizer,  d_model=128, \
+    #         num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
+    #         unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+    #     model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
+    #     if FLAGS.pretrain:
+    #         if FLAGS.pretrain_name=='PTM':
+    #             pretrain_name = 'saved_model/MLM_Transformer/Transformer_multi_514_all_PTM'
+    #         pretrain_model = tf.keras.models.load_model(pretrain_name)
+    #         for li in range(len(pretrain_model.layers)):
+    #             layer = pretrain_model.layers[li]
+    #             if layer.name not in ['my_last_dense', 'reshape',]:
+    #                 model.model.get_layer(index=li).set_weights(layer.get_weights())   
+    if FLAGS.model=='LSTMTransformer':
         model = LSTMTransFormer(FLAGS,FLAGS.model,optimizer,  \
             num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=binary,\
             unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
@@ -94,28 +94,34 @@ def build_model(FLAGS, optimizer , unique_labels, binary=False):
         if FLAGS.pretrain:
             if FLAGS.pretrain_name=='PTM':
                 pretrain_name = 'saved_model/MLM_Transformer/Transformer_multi_514_all_PTM'
+
             pretrain_model = tf.keras.models.load_model(FLAGS.pretrain_name)
+            # pdb.set_trace()
             for layer in pretrain_model.layers:
-                if len(layer.get_weights())!=0:
+                if len(layer.get_weights())!=0 and layer.name!='my_last_dense':
                     model.model.get_layer(name=layer.name).set_weights(layer.get_weights())   
+                    if layer.name != 'my_last_dense':
+                        model.model.get_layer(name=layer.name).trainable = False
+    print(model.model.summary())
+    return model   
+
+
+def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
+    if FLAGS.model=='LSTMTransformer':
+        model = LSTMTransFormer(FLAGS,FLAGS.model,optimizer,  \
+            num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=False,\
+            unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
+        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
+        for layer in pretrain_model.layers:
+            if len(layer.get_weights())!=0 and layer.name!='my_last_dense':
+                model.model.get_layer(name=layer.name).set_weights(layer.get_weights())   
+                if layer.name != 'my_last_dense':
+                    model.model.get_layer(name=layer.name).trainable = False
+    print(model.model.summary())
     return model   
 
 def save_model(model, FLAGS, fold=None):
-    model_name = './saved_model/'+FLAGS.model+'/'+FLAGS.model + '_'+str(FLAGS.seq_len)
-    if FLAGS.neg_sam:
-        model_name+='_negsam'
-    if FLAGS.pretrain:
-        model_name+='_pretrain_'+ FLAGS.pretrain_name
-    if FLAGS.multilabel:
-        model_name += '_multi'
-    # if FLAGS.binary:
-    #     model_name += '_binary'
-    if FLAGS.graph:
-        model_name += '_graph_'
-        model_name += str(FLAGS.fill_cont)
-        if FLAGS.no_pdb:
-            model_name+='_no_pdb_' + str(FLAGS.no_pdb)
-    model_name+='n_layer_'+str(FLAGS.n_lstm)
+    model_name = './saved_model/'
     model_name+=FLAGS.suffix
     if FLAGS.ensemble:
         model_name+='_fold_'+str(fold)
@@ -139,7 +145,7 @@ def main(argv):
     random.seed(FLAGS.random_seed)
     np.random.seed(FLAGS.random_seed)
     tf.random.set_seed(FLAGS.random_seed)
-    #tf.config.run_functions_eagerly(True)#TODO remove
+    # tf.config.run_functions_eagerly(True)#TODO remove
     
     if FLAGS.dataset=='all':
         data_prefix = '{}/PTM_'.format(
@@ -161,12 +167,17 @@ def main(argv):
         train_dat_aug.train_val_split()
         val_dat_aug = train_dat_aug.init_fold(0)
         train_dat_aug.on_epoch_end()
-    else:# Load data
+    elif FLAGS.no_val:# Load data
+        train_dat_aug = PTMDataGenerator(data_prefix+'train.json', FLAGS, shuffle=True,ind=None, eval=False, class_weights=class_weights)
+        unique_labels = train_dat_aug.unique_labels
+        train_dat_aug.on_epoch_end()
+        val_dat_aug= None
+    else:
         train_dat_aug = PTMDataGenerator(data_prefix+'train.json', FLAGS, shuffle=True,ind=None, eval=False, class_weights=class_weights)
         unique_labels = train_dat_aug.unique_labels
         val_dat_aug = PTMDataGenerator(data_prefix+'val.json', FLAGS, shuffle=True,ind=None, eval=True)
         val_dat_aug.update_unique_labels(unique_labels)
-    test_dat_aug = PTMDataGenerator(data_prefix+'test.json', FLAGS, shuffle=True,ind=None, eval=True)
+    test_dat_aug = PTMDataGenerator(data_prefix+'test.json', FLAGS, shuffle=True,ind=None, eval=True)#
     test_dat_aug.update_unique_labels(unique_labels)
 
 
@@ -179,15 +190,29 @@ def main(argv):
     if FLAGS.multilabel:# multi-label      
         training_callbacks = [
             #keras.callbacks.ReduceLROnPlateau(patience = 1, factor = 0.25, min_lr = 1e-05, verbose = 1),
-            keras.callbacks.EarlyStopping(monitor='val_loss',patience = 20, restore_best_weights = True),
+            keras.callbacks.EarlyStopping(monitor='loss',patience = 2, restore_best_weights = True),
             #keras.metrics.Accuracy(),
         ] 
         if FLAGS.ensemble:
             PR_AUCs = {}
             optimizer = tf.keras.optimizers.Adam(learning_rate=FLAGS.learning_rate, amsgrad=True)
-            model = build_model(FLAGS, optimizer, unique_labels, binary=False) 
-            model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
-                    lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
+            if FLAGS.graph:# train MIND first
+                FLAGS.graph=False
+                train_dat_aug.graph=False
+                val_dat_aug.graph=False
+                model = build_model(FLAGS, optimizer, unique_labels, binary=False) 
+                model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
+                        lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
+                FLAGS.graph=True
+                train_dat_aug.graph=True
+                val_dat_aug.graph=True
+                model = build_model_graph(FLAGS, optimizer, unique_labels, model.model)
+                model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
+                        lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
+            else:
+                model = build_model(FLAGS, optimizer, unique_labels, binary=False) 
+                model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
+                        lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
             logging.info('------------------evaluate 0 fold---------------------' )
             AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,val_dat_aug, FLAGS.batch_size, unique_labels, \
                 FLAGS.graph, num_cont=FLAGS.fill_cont) 
@@ -203,9 +228,23 @@ def main(argv):
                 val_dat_aug = train_dat_aug.init_fold(i)
                 train_dat_aug.on_epoch_end()
                 optimizer = tf.keras.optimizers.Adam(learning_rate=FLAGS.learning_rate, amsgrad=True)
-                model = build_model(FLAGS, optimizer, unique_labels, binary=False) 
-                model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
-                    lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
+                if FLAGS.graph:# train MIND first
+                    FLAGS.graph=False
+                    train_dat_aug.graph=False
+                    val_dat_aug.graph=False
+                    model = build_model(FLAGS, optimizer, unique_labels, binary=False) 
+                    model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
+                            lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
+                    FLAGS.graph=True
+                    train_dat_aug.graph=True
+                    val_dat_aug.graph=True
+                    model = build_model_graph(FLAGS, optimizer, unique_labels, model.model)
+                    model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
+                            lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
+                else:
+                    model = build_model(FLAGS, optimizer, unique_labels, binary=False) 
+                    model.train( train_dat_aug, val_dat_aug, FLAGS.seq_len, FLAGS.batch_size, FLAGS.num_epochs, unique_labels,\
+                            lr = FLAGS.learning_rate, callbacks=training_callbacks,graph=FLAGS.graph, num_cont=FLAGS.fill_cont)
                 logging.info('------------------evaluate %d fold---------------------'%(i))
                 AUC, PR_AUC, confusion_matrixs = model.eval(FLAGS.seq_len,val_dat_aug, FLAGS.batch_size, unique_labels, \
                     FLAGS.graph, num_cont=FLAGS.fill_cont) 
@@ -324,13 +363,12 @@ def main(argv):
 
         for u in unique_labels:
             # print(u)
-            if u in optms:
-                print('%.3f'%PR_AUCs[u])
+            print('%.3f'%PR_AUCs[u])
         for u in unique_labels:
-            if u in optms:
-                print(u)
-                print(confu_mats[u])
         
+            print(u)
+            print(confu_mats[u])
+    
     t1 = time.time()
     total_time = t1-t0
     print('the total time used is:')

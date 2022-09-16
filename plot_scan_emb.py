@@ -7,6 +7,7 @@ import pandas as pd
 import re
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
+import pdb
 
 
 def tsne_plot(embs, true_labels, fig_path, perplexity=30):
@@ -39,9 +40,9 @@ def thres(emb, thres=5):
     return new_emb
 
 
-embs = np.load('temp_0.5.npy')
-kinases = np.load('temp_kin_0.5.npy')
-fig_dir = 'analysis/figures/tsne_emb_0.5_new/'
+embs = np.load('saliency/dat/temp_0.8.npy')
+kinases = np.load('saliency/dat/temp_kin_0.8.npy')
+fig_dir = 'analysis/figures/tsne_emb_0.8/'
 
 all_st_kinase = ['p38_Kin','CDK1_1','PLK1','Casn_Kin2','PKC_epsilon','DNA_PK','AuroA','PKC_zeta',\
     'PKC_common','GSK3_Kin','ATM_Kin','AMPK','PKA_Kin','Clk2_Kin','Cdc2_Kin','Cam_Kin2','GSK3b',\
@@ -54,25 +55,25 @@ pro_depend_kinase = ['Cdc2_Kin', 'Cdk5_Kin', 'Erk1_Kin', 'p38_Kin', 'CDK1_1', 'C
 all_y_kinase = ['EGFR_Kin','Fgr_Kin','Lck_Kin','Src_Kin','InsR_Kin','PDGFR_Kin','Itk_Kin','Abl_Kin']
 
 # for all st kinase
-select_index = [k for k,kin in enumerate(kinases) if kin in acid_kinase+base_kinase+pro_depend_kinase]
-select_embs = embs[select_index,]
-select_kinases = kinases[select_index,]
+# select_index = [k for k,kin in enumerate(kinases) if kin in acid_kinase+base_kinase+pro_depend_kinase]
+# select_embs = embs[select_index,]
+# select_kinases = kinases[select_index,]
 
-group_kinases = []
-for kin in select_kinases:
-    if kin in acid_kinase:
-        group_kinases.append('Acidophilic')
-    elif kin in base_kinase:
-        group_kinases.append('Basophilic')
-    # elif kin in DNA_damage_kinase:
-    #     group_kinases.append('DNA damage')
-    elif kin in pro_depend_kinase:
-        group_kinases.append('Proline-dependent')
+# group_kinases = []
+# for kin in select_kinases:
+#     if kin in acid_kinase:
+#         group_kinases.append('Acidophilic')
+#     elif kin in base_kinase:
+#         group_kinases.append('Basophilic')
+#     # elif kin in DNA_damage_kinase:
+#     #     group_kinases.append('DNA damage')
+#     elif kin in pro_depend_kinase:
+#         group_kinases.append('Proline-dependent')
 
 # norm_embs = np.divide(select_embs,np.linalg.norm(select_embs, axis=1, keepdims=True))
 # thres_embs = [thres(emb,3) for emb in norm_embs]
 # thres_embs = np.stack(thres_embs)
-# for per in [100]:
+# for per in [50,100,200]:
 #     tsne_plot(norm_embs, group_kinases, fig_dir+'all_ST_kinase_emb_tsne_'+str(per)+'.pdf', perplexity=per)
 #     tsne_plot(thres_embs, group_kinases, fig_dir + 'all_ST_kinase_emb_tsne_thres_'+str(per)+'.pdf',perplexity=per)
 # pca_plot(norm_embs, group_kinases, fig_dir+'all_ST_kinase_emb_pca.pdf')

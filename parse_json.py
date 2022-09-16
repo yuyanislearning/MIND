@@ -2,11 +2,11 @@ import os
 import json
 import pdb
 
-a = os.popen('ls /workspace/PTM/Data/Musite_data/PTM_test/BCAA/').read().split('\n')
+a = os.popen('ls /local2/yuyan/PTM-Motif/Data/Musite_data/PTM_test/BCAA/').read().split('\n')
 for i in a:
     uid = i.split('.json')[0]
-    f = open('/workspace/PTM/Data/Musite_data/PTM_test/temp/'+uid+'_OPTM.txt','w')
-    with open('/workspace/PTM/Data/Musite_data/PTM_test/BCAA/'+i) as fr:
+    f = open('/local2/yuyan/PTM-Motif/Data/Musite_data/PTM_test/temp/'+uid+'_OPTM.txt','w')
+    with open('/local2/yuyan/PTM-Motif/Data/Musite_data/PTM_test/BCAA/'+i) as fr:
         dat = json.load(fr)
     for k in dat:
         if float(dat[k])>0.5:

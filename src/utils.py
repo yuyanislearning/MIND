@@ -22,6 +22,7 @@ from os.path import exists
 from scipy import sparse
 from tqdm import tqdm
 import re
+import os 
 
 from .tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token, ALL_AAS
 
@@ -39,7 +40,7 @@ def handle_flags():
     flags.DEFINE_string('res_path',
             'res', 'path to result dir')
     flags.DEFINE_string('adj_dir',
-            '/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_cont_map/', 'path to structure adjency matrix')
+            '/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_updated_cont_map/', 'path to structure adjency matrix')
     flags.DEFINE_string('pretrain_name',
                 'PTM', 'name of pretrain model')  
     flags.DEFINE_string('suffix', '', 'model name suffix')
@@ -63,15 +64,24 @@ def handle_flags():
     flags.DEFINE_bool("random_ensemble", False, "random batch ensemble learning")
     flags.DEFINE_bool("embedding", False, "use embedding from ProtTrans")
     flags.DEFINE_bool("twentyA", False, "use twentyA")
+    flags.DEFINE_bool("dy_len", False, "use dynamic batching")
+    flags.DEFINE_bool("alpha_shape", False, "use alpha shape as graph")
+    flags.DEFINE_bool("no_val", False, "no validation data")
+    flags.DEFINE_bool("node", False, "add node features")
+    flags.DEFINE_bool("ic_graph", False, "incomplete graph")
+    flags.DEFINE_bool("dt", False, "double transformer")
+    flags.DEFINE_bool("gt", False, "graph transformer")
+    flags.DEFINE_bool("sasa", False, "use sasa as features")
+    flags.DEFINE_bool("inter", False, "for interpretation")
 
     # Training parameters.
     flags.DEFINE_integer("seq_len", 514, "maximum lenth+2 of the model sequence (default: 512)")
     flags.DEFINE_integer("batch_size", 64, "Batch Size (default: 32)")# 128 for 514; 32 for 1026; 8 for 2050
     flags.DEFINE_integer("num_epochs",
-            100, "Number of training epochs (default: 20)")
+            300, "Number of training epochs (default: 20)")
     flags.DEFINE_integer("n_lstm", 3, "number of lstm layer for rnn model")
     flags.DEFINE_integer("n_gcn", 3, "number of gcn layer")
-    flags.DEFINE_integer("fill_cont", 4, "how many sequence should be considered as neighbour/2")
+    flags.DEFINE_integer("fill_cont", 5, "how many sequence should be considered as neighbour/2")
     flags.DEFINE_integer("global_heads", 2, "number of heads allocated to global attention")
     flags.DEFINE_integer("n_fold", 5, "k-fold cross validation")
     flags.DEFINE_integer("d_model", 128, "k-fold cross validation")
@@ -83,6 +93,8 @@ def handle_flags():
             1e-3, 'Learning rate while training (default: 1e-3)')
     flags.DEFINE_float('l2_reg',
             1e-3, 'L2 regularization lambda (default: 1e-3)')
+    flags.DEFINE_float('percentage',
+            None, 'percentage of data to use')            
     FLAGS = flags.FLAGS
 
 
@@ -119,7 +131,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         self.class_weights = class_weights
         self.seq_len = FLAGS.seq_len
         self.spar = True
-        self.dy_len = False
+        self.dy_len = FLAGS.dy_len
         self.dat_aug = FLAGS.dat_aug
         self.dat_aug_thres = 5
         self.ensemble = FLAGS.ensemble
@@ -139,12 +151,17 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
             # data structure: {PID:{seq, label:[{site, ptm_type}]}}
             dat = json.load(fp)
             print('loading data')
-            for k in tqdm(dat):
+            for dat_count, k in tqdm(enumerate(dat)):
                 # some case that the data miss sequence, skip
                 if dat[k].get('seq',-1)==-1:
                     continue
+                if k=='Q95JN5':
+                    continue
+                if FLAGS.percentage is not None and not eval:
+                    if dat_count > len(dat)*FLAGS.percentage:
+                        break
                 records = self.cut_protein(dat,records, k, chunk_size=FLAGS.seq_len-2, eval=eval)
-        if self.ensemble and not eval:
+        if (self.ensemble or self.FLAGS.no_val) and not eval:
             file_name = FLAGS.data_path+'/PTM_val.json'
             with open(file_name, 'r') as fp:
                 dat = json.load(fp)
@@ -163,6 +180,8 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
         # get unique labels
         self.unique_labels = sorted(set([l['ptm_type'] for d in records for l in d['label'] ]))
+
+        
         self.label_to_index = {str(label): i for i, label in enumerate(self.unique_labels)}
         self.index_to_label = {i: str(label) for i, label in enumerate(self.unique_labels)}
 
@@ -231,13 +250,142 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         self.dat_len = len(self.uid)
         # get graph
         if self.graph:
-            get_graph(self.uid, self.X, self.fill_cont , self.chunk_size, \
-                FLAGS.split_head, FLAGS.no_pdb,FLAGS.adj_dir, FLAGS.seq_len, FLAGS.twentyA)
+            if not self.dy_len:
+                self.get_graph()
+        
+        if self.FLAGS.sasa:
+            self.get_sasa()
 
         logging.info('Loaded {} records from {}.'.format(len(self.seq),file_name))
 
 
         self.on_epoch_end()
+
+
+    def get_sasa(self):
+        sasa_dir = '/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_updated_freesasa'
+        self.sasa = []
+        for i in tqdm(range(len(self.uid))):
+        
+            if '~' in self.uid[i]:
+                n_seq = int(self.uid[i].split('~')[1])
+                tuid = self.uid[i].split('~')[0]
+                if exists(os.path.join(sasa_dir, tuid+ '_freesasa.npy')):
+                    sasa_array = np.load(os.path.join(sasa_dir, tuid+ '_freesasa.npy'))
+                    n = sasa_array.shape[0]
+                    left_slice = n_seq*self.chunk_size//2
+                    right_slice = min((n_seq+2)*self.chunk_size//2, n)
+                    sasa_array = sasa_array[left_slice:right_slice]
+                else:
+                    n = np.where(np.array(self.X[i])==24)[0][0]-1
+                    sasa_array = np.ones((n,))*40
+
+            else:
+                uid = self.uid[i]
+                if exists(os.path.join(sasa_dir, uid+ '_freesasa.npy')):
+                    sasa_array = np.load(os.path.join(sasa_dir, uid+ '_freesasa.npy'))
+                else:
+                    n = np.where(np.array(self.X[i])==24)[0][0]-1
+                    sasa_array = np.ones((n,))*40
+            if sasa_array.shape[0]< self.FLAGS.seq_len:
+                sasa_array = np.concatenate((sasa_array, np.zeros((self.FLAGS.seq_len - len(sasa_array), )))) 
+            sasa_array = np.expand_dims(sasa_array, -1)
+            self.sasa.append(sasa_array)
+
+        return None
+
+    def get_graph(self):
+        if self.FLAGS.twentyA:
+            self.FLAGS.adj_dir+='_20A'
+        if self.FLAGS.alpha_shape:
+            self.FLAGS.adj_dir = '/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_updated_alpha_shape/'
+        print('constructing graphs')
+        for i in tqdm(range(len(self.uid))):
+            
+            adj_name = './ttt/'+self.uid[i]+'_'+str(self.seq_len)+'_'+str(self.FLAGS.fill_cont)+'_'+'20A.npy' if self.FLAGS.twentyA else\
+                './ttt/'+self.uid[i]+'_'+str(self.FLAGS.seq_len)+'_'+str(self.FLAGS.fill_cont)+'.npy'
+ 
+            if self.FLAGS.alpha_shape:
+                adj_name = './ttt/'+self.uid[i]+'_'+str(self.FLAGS.seq_len)+'_'+str(self.FLAGS.fill_cont)+'_'+'AS.npy'
+            if self.FLAGS.ic_graph:
+                adj_name = adj_name[:-4]
+                adj_name += '_ic.npy'
+            if self.FLAGS.gt:
+                adj_name = adj_name[:-4]
+                adj_name += '_gt.npy'
+            if not exists(adj_name):
+                if '~' in self.uid[i]:
+                    n_seq = int(self.uid[i].split('~')[1])
+                    tuid = self.uid[i].split('~')[0]
+                    if self.FLAGS.alpha_shape:
+                        if exists(self.FLAGS.adj_dir+tuid+'_alpha_shape.npy') and not self.FLAGS.no_pdb:
+                            adj = np.load(self.FLAGS.adj_dir+tuid+'_alpha_shape.npy')
+                            n = adj.shape[0]
+                            left_slice = n_seq*self.chunk_size//2
+                            right_slice = min((n_seq+2)*self.chunk_size//2, n)
+                            adj = adj[left_slice:right_slice, left_slice:right_slice]
+                            # adj = assign_neighbour(adj, 0, split_head)
+                        else:
+                            n = np.where(np.array(self.X[i])==24)[0][0]-1
+                            adj = np.zeros((n,n))
+                            adj = assign_neighbour(adj, self.FLAGS.fill_cont, self.FLAGS.split_head)
+            
+                    else:
+                        if exists(self.FLAGS.adj_dir+tuid+'.cont_map.npy') and not self.FLAGS.no_pdb:
+                            adj = np.load(self.FLAGS.adj_dir+tuid+'.cont_map.npy')
+                            n = adj.shape[0]
+                            left_slice = n_seq*self.chunk_size//2
+                            right_slice = min((n_seq+2)*self.chunk_size//2, n)
+                            adj = adj[left_slice:right_slice, left_slice:right_slice]
+                                
+                            if self.FLAGS.ic_graph:
+                                adj = rm_diag(adj, self.FLAGS.fill_cont)
+                            # adj = assign_neighbour(adj, 0, split_head)
+                        else:
+                            n = np.where(np.array(self.X[i])==24)[0][0]-1
+                            adj = np.zeros((n,n))
+                            adj = assign_neighbour(adj, self.FLAGS.fill_cont, self.FLAGS.split_head)
+                else:
+                    if self.FLAGS.alpha_shape:
+                        if exists(self.FLAGS.adj_dir+self.uid[i]+'_alpha_shape.npy') and not self.FLAGS.no_pdb:
+                            adj = np.load(self.FLAGS.adj_dir+self.uid[i]+'_alpha_shape.npy')
+                            # adj = assign_neighbour(adj, 0, split_head)
+                            # n = adj.shape[0]
+                            # # pad adj with [0] as 0 for start 
+                            # pad_adj[1:(1+n),1:(1+n)] = adj
+                        else:
+                            # 24 is the stop sign
+                            n = np.where(np.array(self.X[i])==24)[0][0]-1
+                            adj = np.zeros((n,n))
+                            adj = assign_neighbour(adj, self.FLAGS.fill_cont, self.FLAGS.split_head)
+                    else:
+                        if exists(self.FLAGS.adj_dir+self.uid[i]+'.cont_map.npy') and not self.FLAGS.no_pdb:
+                            adj = np.load(self.FLAGS.adj_dir+self.uid[i]+'.cont_map.npy')
+                            if not self.FLAGS.ic_graph:
+                                adj = assign_neighbour(adj, 0, self.FLAGS.split_head)
+                            else:
+                                adj = rm_diag(adj,self.FLAGS.fill_cont)
+                            # n = adj.shape[0]
+                            # # pad adj with [0] as 0 for start 
+                            # pad_adj[1:(1+n),1:(1+n)] = adj
+                        else:
+                            # 24 is the stop sign
+                            n = np.where(np.array(self.X[i])==24)[0][0]-1
+                            adj = np.zeros((n,n))
+                            adj = assign_neighbour(adj, self.FLAGS.fill_cont, self.FLAGS.split_head)
+                if not self.FLAGS.gt:
+                    adj = pad_adj(adj, self.FLAGS.seq_len)
+                else:
+                    adj = graph_encoding(adj, 20, self.FLAGS.seq_len)
+                np.save(adj_name,adj)
+            else:
+                next
+                # try:
+                #     adj = np.load(adj_name)
+                # except:
+                #     os.system('rm '+ adj_name)
+
+        return None
 
     def train_val_split(self):
         # splitting training and validation
@@ -480,7 +628,39 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
             X = [X]
         
         if self.graph:
-            adjs = np.array([np.load('./temp/'+id+'_'+str(self.seq_len)+'_'+str(self.fill_cont)+'.npy') for id in uid])
+            if not self.dy_len:
+                suffix = '_AS' if self.FLAGS.alpha_shape else ''
+                suffix = '_ic' if self.FLAGS.ic_graph else ''
+                if not self.FLAGS.gt:
+                    adjs = np.array([np.load('./ttt/'+id+'_'+str(self.seq_len)+'_'+str(self.fill_cont)+suffix+'.npy', allow_pickle=True) for id in uid])
+                if self.FLAGS.gt:
+                    adjs = [np.load('./ttt/'+id+'_'+str(self.seq_len)+'_'+str(self.fill_cont)+suffix+'_gt.npy', allow_pickle=True) for id in uid]
+                    adjs = np.stack(adjs, axis=0)
+            else:
+                adjs = get_graph_dy_len(uid, X[0], self.fill_cont , self.chunk_size, \
+                    self.FLAGS.split_head, self.FLAGS.no_pdb,self.FLAGS.adj_dir, max_batch_seq_len, self.FLAGS.twentyA)
+            
+            X.append(adjs)
+        if self.FLAGS.node:
+            node_features = []
+            for id in uid:
+                if '~' in id:
+                    uni_id = id.split('~')[0]
+                    chunk_id = int(id.split('~')[1])
+                    node_fea = np.load('/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_NF/'+uni_id+'_node_features.npy')
+                    if chunk_id*self.chunk_size//2+self.chunk_size > node_fea.shape[0]:
+                        node_fea = node_fea[chunk_id*self.chunk_size//2:node_fea.shape[0],:]
+                    else:
+                        node_fea = node_fea[chunk_id*self.chunk_size//2:chunk_id*self.chunk_size//2+self.chunk_size,:]
+                else:
+                    node_fea = np.load('/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_NF/'+id+'_node_features.npy')
+                node_features.append(pad_node(node_fea, self.seq_len))
+            node_features = np.stack(node_features,axis=0)
+            X.append(node_features)
+        
+        if self.FLAGS.sasa:
+            sasas= np.stack([self.sasa[b] for b in batch], axis=0)
+            X.append(sasas)
             # graphs = []
             # for id in uid:
             #     adj = np.load('./temp/'+id+'_'+str(self.seq_len)+'_'+str(self.fill_cont)+'.npy')
@@ -489,7 +669,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
             # edge_indexs = np.expand_dims(np.array(edge_index),0)
             # print(edge_indexs.shape)
 
-            X.append(adjs)
+            
         
         if 'Transformer' in self.model:
             pos_encoding = positional_encoding(max_batch_seq_len,
@@ -509,6 +689,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         sequence = str(dat[k]['seq'])
         labels = dat[k]['label']
         pos_label = list(set([lbl['ptm_type'] for lbl in labels]))
+
         if len(sequence) > chunk_size:
             label_count = 0
             for i in range((len(sequence)-1)//half_chunk_size):
@@ -557,13 +738,13 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
             neg_index = np.array([j for j,amino in enumerate(seq[0:chunk_size//4*3]) if amino in aa])
         elif '<PAD>' in seq:
             # last chunk includes the last leftover chunk
-            neg_index = np.array([j for j,amino in enumerate(seq[chunk_size//4:len(seq)-1]) if amino in aa])+ chunk_size//4
+            neg_index = np.array([j for j,amino in enumerate(seq[chunk_size//4:len(seq)]) if amino in aa])+ chunk_size//4
         else:
             # other chunk takes only the middle half chunk to avoid duplication in negative sample
             neg_index = np.array([j for j,amino in enumerate(seq[chunk_size//4: chunk_size//4*3]) if amino in aa])+ chunk_size//4        
         return neg_index
 
-
+    
     def pad_X(self, X, seq_len):
         return np.array([seq_tokens + (seq_len - len(seq_tokens)) * [additional_token_to_index['<PAD>']] for seq_tokens in X])
     
@@ -571,6 +752,25 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         num_label = len(self.unique_labels) if not self.binary else 1
         return np.array([np.concatenate((y, np.zeros((seq_len - len(y), num_label))))  for y in Y])
     
+def pad_node(node_fea, seq_len):
+    return np.concatenate((node_fea,np.zeros((seq_len-node_fea.shape[0], node_fea.shape[1]))), axis=0)
+
+def graph_encoding(adj, encode_d, seq_len):
+    D = np.diag(np.sum(adj,axis=1)** -0.5)
+    L = np.eye(adj.shape[0]) - np.matmul(np.matmul(D ,adj),  D)
+    # eigen vectors
+    EigVal, EigVec = np.linalg.eig(L)
+
+    EigVec = EigVec[:, EigVal.argsort()] # increasing order
+    if EigVec.shape[1]<encode_d:
+        EigVec = np.concatenate((EigVec,np.zeros((EigVec.shape[0], encode_d - EigVec.shape[1]))), axis=1)
+    else:
+        EigVec = EigVec[:, 0:encode_d]
+    if EigVec.shape[0] < seq_len:
+        EigVec = np.concatenate((EigVec, np.zeros((seq_len - EigVec.shape[0], EigVec.shape[1]))), axis=0)
+    return EigVec
+
+
 class embed():
     def __init__(self):
         # get embedding from protTrans
@@ -606,13 +806,16 @@ def sample_aug_index(all_neg_index, count, seq):
     return np.array(list(set(np.random.randint(1, seq.index('<END>')-1, size = count)) - set(all_neg_index)))
 
 
-def get_graph(uid,X, num_cont, chunk_size, split_head, no_pdb, adj_dir, seq_len, twentyA):
+
+
+
+def get_graph_dy_len(uid,X, num_cont, chunk_size, split_head, no_pdb, adj_dir, seq_len, twentyA):
     if twentyA:
         adj_dir+='_20A'
-    print('constructing graphs')
-    for i in tqdm(range(len(uid))):
-        adj_name = './temp/'+uid[i]+'_'+str(seq_len)+'_'+str(num_cont)+'_'+'20A.npy' if twentyA else\
-             './temp/'+uid[i]+'_'+str(seq_len)+'_'+str(num_cont)+'.npy'
+    adjs = []
+    for i in range(len(uid)):
+        adj_name = './ttt/'+uid[i]+'_'+str(seq_len)+'_'+str(num_cont)+'_'+'20A.npy' if twentyA else\
+             './ttt/'+uid[i]+'_'+str(seq_len)+'_'+str(num_cont)+'.npy'
         if not exists(adj_name):
             if '~' in uid[i]:
                 n_seq = int(uid[i].split('~')[1])
@@ -640,10 +843,12 @@ def get_graph(uid,X, num_cont, chunk_size, split_head, no_pdb, adj_dir, seq_len,
                     n = np.where(np.array(X[i])==24)[0][0]-1
                     adj = np.zeros((n,n))
                     adj = assign_neighbour(adj, num_cont, split_head)
-            adj = 1-pad_adj(adj, seq_len)
+            adj = pad_adj(adj,seq_len)#1-pad_adj(adj, seq_len)
             np.save(adj_name,adj)
-    return None
-
+        else:
+            adj = np.load(adj_name)
+        adjs.append(adj)
+    return np.array(adjs)
 
 def pad_adj( adj, seq_len):
     pad_adj = np.zeros((seq_len, seq_len))
@@ -667,6 +872,16 @@ def assign_neighbour(adj, num_cont, split_head):
     # adj[adj>0] = 1
     return adj
 
+def rm_diag(adj,fill_cont):
+    n = adj.shape[0]
+    if fill_cont>=n:
+        return np.zeros((n,n), dtype=int)
+    else:
+        for i in range(n):
+            left = max(i-fill_cont,0)
+            right = min(i+fill_cont+1, n)
+            adj[i,left:right] = 1
+    return adj
 
 def get_unique_labels(train_set, valid_set, test_set):
     return sorted( set([l['ptm_type'] for d in train_set.records for l in d['label'] ]).union(\
@@ -866,7 +1081,6 @@ class MLMDataGenerator(tf.keras.utils.Sequence):
         # Y = tf.expand_dims(Y,-1)
         # sample_weights = tf.expand_dims(sample_weights,-1)
 
-        pdb.set_trace()
         X = [X]
         
         pos_encoding = positional_encoding(max_batch_seq_len,
@@ -1007,6 +1221,52 @@ class MLMUniparcDataGenerator(tf.keras.utils.Sequence):
         num_label = 1
         return np.array([np.concatenate((y, np.zeros((seq_len - len(y), num_label))))  for y in Y])
 
+
+def cut_protein(sequence, seq_len, aa):
+    # cut the protein if it is longer than chunk_size
+    # only includes labels within middle chunk_size//2
+    # during training, if no pos label exists, ignore the chunk
+    # during eval, retain all chunks for multilabel; retain all chunks of protein have specific PTM for binary
+    chunk_size = seq_len - 2
+    assert chunk_size%4 == 0
+    quar_chunk_size = chunk_size//4
+    half_chunk_size = chunk_size//2
+    records = []
+    if len(sequence) > chunk_size:
+        for i in range((len(sequence)-1)//half_chunk_size):
+            # the number of half chunks=(len(sequence)-1)//chunk_size+1,
+            # minus one because the first chunks contains two halfchunks
+            max_seq_ind = (i+2)*half_chunk_size
+            if i==0:
+                cover_range = (0,quar_chunk_size*3)
+            elif i==((len(sequence)-1)//half_chunk_size-1):
+                cover_range = (quar_chunk_size, len(sequence)-i*half_chunk_size)
+                max_seq_ind = len(sequence)
+            else:
+                cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
+            seq = sequence[i*half_chunk_size: max_seq_ind]
+            idx = [j for j in range(len((seq))) if (seq[j] in aa and j >= cover_range[0] and j < cover_range[1])]
+            records.append({
+                'chunk_id': i,
+                'seq': seq,
+                'idx': idx
+            })
+    else:
+        records.append({
+            'chunk_id': None,
+            'seq': sequence,
+            'idx': [j for j in range(len((sequence))) if sequence[j] in aa]
+        })
+    return records
+
+
+def ensemble_get_weights(PR_AUCs, unique_labels):
+    weights = {ptm:None for ptm in unique_labels}
+    for ptm in unique_labels:
+        weight = np.array([PR_AUCs[str(i)][ptm] for i in range(len(PR_AUCs))])
+        weight = weight/np.sum(weight)
+        weights[ptm] = weight
+    return weights # {ptm_type}
 
 
 class CategoricalTruePositives(tf.keras.metrics.Metric):
