@@ -1,5 +1,4 @@
-![header](header.png){width=100}
-<img src='header.png' width=50% height=50%>
+<img src='header.png' width=20% height=20%>
 
 # MIND-S AI4PTM
 
