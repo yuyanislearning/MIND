@@ -75,12 +75,9 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
-        if self.split_head:
-            scaled_attention, attention_weights = local_global_attention(
-                q, k, v, mask, graph_mask, self.global_heads, self.fill_cont)
-        else:
-            scaled_attention, attention_weights = scaled_dot_product_attention(
-                q, k, v, mask, graph_mask)
+
+        scaled_attention, attention_weights = scaled_dot_product_attention(
+            q, k, v, mask, graph_mask)
 
         scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])  # (batch_size, seq_len_q, num_heads, depth)
 
@@ -91,37 +88,6 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         return output, attention_weights
 
-def local_global_attention(q, k, v, mask, graph_mask, global_heads, fill_cont):
-    """Calculate the attention weights.
-    q, k, v must have matching leading dimensions.
-    k, v must have matching penultimate dimension, i.e.: seq_len_k = seq_len_v.
-    The mask has different shapes depending on its type(padding or look ahead)
-    but it must be broadcastable for addition.
-
-    Args:
-        q: query shape == (..., seq_len_q, depth)
-        k: key shape == (..., seq_len_k, depth)
-        v: value shape == (..., seq_len_v, depth_v)
-        mask: Float tensor with shape broadcastable
-            to (..., seq_len_q, seq_len_k). Defaults to None.
-
-    Returns:
-        output, attention_weights
-    """
-    # q = q / tf.math.sqrt(head_dim)
-
-    # split the heads to global and local
-    q_local = q[:,:-global_heads,:,:]
-    q_global = q[:,-global_heads:,:,:]
-    k_local = k[:,:-global_heads,:,:]
-    k_global = k[:,-global_heads:,:,:]
-    v_local = v[:,:-global_heads,:,:]
-    v_global = v[:,-global_heads:,:,:]
-
-    output_global, attention_weights_global = scaled_dot_product_attention(q_global, k_global, v_global, mask, graph_mask)
-    output_local, attention_weights_local = local_attention(q_local, k_local, v_local, mask, graph_mask, fill_cont)
-
-    return output, attention_weights
 
 def local_attention(q, k, v, mask, graph_mask, fill_cont):
     """Calculate the attention weights.
@@ -263,25 +229,6 @@ def local_attention(q, k, v, mask, graph_mask, fill_cont):
     return output, attention_weights
 
 
-class graph_seq_attn(tf.keras.layers.Layer):
-    def __init__(self, d_model ):
-        super(graph_seq_attn, self).__init__()
-
-        self.w1 = layers.Dense(d_model, activation = 'tanh', name = 'seq_weight')
-        self.w2 = layers.Dense(d_model, activation = 'tanh', name = 'graph_weight')
-        self.w = layers.Dense(1, activation = 'linear', name = 'attn_wei')
-
-    def call(self, seq, graph):
-
-        seq_rep = tf.expand_dims(self.w(self.w1(seq)),axis=-1) # (batch, seq_len, 1)
-        graph_rep = tf.expand_dims(self.w(self.w2(graph)),axis=-1) #(batch, seq_len, 1)
-
-        alpha = tf.concat((seq_rep, graph_rep), axis=-1, name='concat_a')#(batch, seq_len, 2)
-        alpha = tf.nn.softmax(alpha, axis=-1)
-        alpha_seq, alpha_graph = tf.unstack(alpha, axis=-1)
-
-        return tf.multiply(alpha_seq, seq) + tf.multiply(alpha_graph, graph)
-
 def _mask_invalid_locations(input_tensor, window_overlap):
     # create correct upper triangle bool mask
     mask_2d_upper = tf.reverse(
@@ -407,19 +354,3 @@ def create_padding_mask(seq):
 def get_angles(pos, i, d_model):
     angle_rates = 1 / np.power(10000, (2 * (i//2)) / np.float32(d_model))
     return pos * angle_rates
-
-def positional_encoding(position, d_model):
-    # get positional encoding for sequence
-    angle_rads = get_angles(np.arange(position)[:, np.newaxis],
-                            np.arange(d_model)[np.newaxis, :],
-                            d_model)
-
-    # apply sin to even indices in the array; 2i
-    angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
-
-    # apply cos to odd indices in the array; 2i+1
-    angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
-
-    pos_encoding = angle_rads[np.newaxis, ...]
-
-    return tf.cast(pos_encoding, dtype=tf.float32)

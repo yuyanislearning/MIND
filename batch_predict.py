@@ -21,18 +21,16 @@ from sklearn.metrics import f1_score, precision_recall_curve, auc, roc_auc_score
 from os.path import exists
 
 
-import pdb
 
-from src.utils import get_class_weights,  limit_gpu_memory_growth, PTMDataGenerator
+from src.utils import get_class_weights,  limit_gpu_memory_growth, handle_flags
 from src import utils
 from src.model import TransFormerFixEmbed,  RNN_model, TransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
-# model_name = 'saved_model/LSTMTransformer/LSTMTransformer_514_multin_layer_3OPTM_r15'
-# model_name = 'saved_model/CNN/CNN_514_multin_layer_3CNN_36912/'
-suffix = 'OPTM_fifthteen'
-model_name = 'saved_model/' + suffix
+
+handle_flags()
+
 fold = 15
 avg_weight = False
 
