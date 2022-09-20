@@ -1,4 +1,4 @@
-![header](header.png)
+![header](header.png | width=100)
 
 # MIND-S AI4PTM
 
