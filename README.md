@@ -1,6 +1,7 @@
 <img src='header.png' width=20% height=20%>
 
 # MIND-S AI4PTM
+<img src='GA.png'>
 
 MIND (Multilabel INterpretable Deep learning method for PTM prediction) is a deep learning tool for making PTM predictions based on protein sequence, or protein structure. MIND-S features interpretability through evaluating the saliency for each input residual. MIND can also be utilized as a tool for evaluating effects of genetic mutation (e.g. SNP) on PTM.
 
@@ -39,6 +40,7 @@ python predict_saliency.py \
 ```
 
 ## examine SNP effect
+<img src='SNP.png'>
 MIND supports examination of SNP effect on PTMs. The fasta file of the protein interested and the SNP information should be provided. 
 THe following code will provide the results of both wild type and mutant protein sequence. 
 ```bash
