@@ -10,8 +10,25 @@ Install MIND:
 ```bash
 git clone https://github.com/yuyanislearning/MIND.git
 cd MIND
-pip install -r requirement
 ```
+
+### Build environment from docker file (Optional)
+We provide a Dockerfile which directly sets up the tensorflow and relevant package. More information about docker can be found [here](https://www.docker.com/). 
+The prerequisite for using the docker can be found [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/tensorflow).
+After prerequisite is satisfied, you can download the dockerfile [here](https://drive.google.com/file/d/1SlUNKthEDH_RuTkDI02g8bmZa0lig7BL/view?usp=sharing)
+Run the following to build a docker image
+```bash
+mkdir docker_build
+cd docker_build
+mv [path to Downloaded dockerfile]/Dockerfile ./
+docker build -t yuyanislearning/mind:1.0 .
+```
+Then run the following to run a docker container
+```bash
+docker run --gpus all -it --rm -v [Path to your working directory, need to contain MIND]:/workspace yuyanislearning/mind:1.0
+```
+
+
 
 ## Make predictions
 MIND allows batch predictions for multiple proteins. A fasta files contains all protein sequence can be used as the input with run the following code.
