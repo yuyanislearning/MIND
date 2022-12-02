@@ -26,12 +26,8 @@ from src.model import TransFormerFixEmbed,  RNN_model, LSTMTransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
-model_name = 'saved_model/con_g'
-fold = 1
-prob_thres = 0.8
-handle_flags()
-ensemble=False
 
+handle_flags()
 
 def cut_protein(sequence, seq_len, aa):
     # cut the protein if it is longer than chunk_size
@@ -82,7 +78,6 @@ def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
                     model.model.get_layer(name='encoder_layer_0').set_weights(layer.get_weights())
                 else:
                     model.model.get_layer(name=layer.name).set_weights(layer.get_weights())   
-
     print(model.model.summary())
     return model   
 
@@ -98,7 +93,7 @@ def main(argv):
     label_to_index = {str(label): i for i, label in enumerate(unique_labels)}
     index_to_label = {i: str(label) for i, label in enumerate(unique_labels)}
 
-    model = tf.keras.models.load_model(model_name)
+    model = tf.keras.models.load_model(FLAGS.pretrain_name+'_fold_0')
     
     emb_model = keras.models.Model(
         [model.inputs], [model.get_layer('embedding').output]
@@ -107,193 +102,68 @@ def main(argv):
                         learning_rate=FLAGS.learning_rate, amsgrad=True)
     grad_model = build_model_graph(FLAGS, optimizer , unique_labels, model).model
     
-
     chunk_size = FLAGS.seq_len - 2
 
-    if True:
-        kin_name = 'CDK1_1'
-        with open('/local2/yuyan/PTM-Motif/Data/Musite_data/Phosphorylation_motif/correct_scan_kinase.json') as fk:
-            scan = json.load(fk)
-        zero_locals = []
-        for uid in scan:
-            for kin in scan[uid]:
-                if kin[1]==kin_name: #and uid =='A0A096MK47':           
-                    site = kin[0]
-                    with open('/local2/yuyan/PTM-Motif/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
-                        # data structure: {PID:{seq, label:[{site, ptm_type}]}}
-                        sequence = str(list(SeqIO.parse(fp, 'fasta'))[0].seq)
-                        records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])
-                    preds = {}
-                    for record in records:
-                        seq = record['seq']
-                        idx = record['idx']
-                        chunk_id = record['chunk_id']
-                        if chunk_id is None:
-                            name_id = ''
-                            chunk_id = 0
-                        else:
-                            name_id = '~'+str(chunk_id)
-                        if FLAGS.graph:
-                            adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
-                            adj = np.expand_dims(adj, 0)
-
-                        X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-                        if FLAGS.graph:
-                            X = [tf.expand_dims(X, 0),adj, tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-                        else:
-                            X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-                        
-                        if chunk_id==0:
-                            cover_range = (0,chunk_size//4*3)
-                        elif chunk_id==((len(sequence)-1)//-1):
-                            cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
-                        else:
-                            cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
-
-                        # only get gradient when the seq_idx fall in the range
-                        if site >=cover_range[0] and site < cover_range[1]:
-                            # get gradient for specific ptm
-                            seq_idx = site - chunk_id*chunk_size//2 
-                            kin_name = kin[1]
-                            temp_label = 'Phos_ST' if seq[seq_idx] in 'ST' else 'Phos_Y'
-                            pred_score =  model(X).numpy()
-                            pred_score = pred_score.reshape(1, -1,13)
-                            
-                            if pred_score[0, seq_idx+1, label_to_index[temp_label]] < prob_thres:
-                                continue
-                            print(pred_score[0, seq_idx+1, label_to_index[temp_label]])
-                            fig_name = 'figs/con_g/'+'_'.join([uid,str(site), 'Phos_ST'])
-                            emb = emb_model(X)
-                            m_steps = 50
-                            alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
-                            # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
-                            # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
-                            # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                            interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1)
-                            if interpolated_emb is None:
-                                continue
-                            emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[temp_label], \
-                                seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
-                            # if prob>0.9:
-                            zero_local = heatmap(emb_grads, 7, fle=(fig_name+'_'+kin_name+str(FLAGS.graph)+'.pdf'))
-                            zero_locals.append(zero_local)
-    # elif True:
-    #     site = 2345
-    #     uid = 'A2AJK6'
-    #     with open('/local2/yuyan/PTM-Motif/Data/Musite_data/fasta/'+uid+'.fa', 'r') as fp:
-    #         # data structure: {PID:{seq, label:[{site, ptm_type}]}}
-    #         sequence = str(list(SeqIO.parse(fp, 'fasta'))[0].seq)
-    #     SNP1_sequence = sequence[:1441] + 'C' + sequence[(1441 + 1):]
-    #     SNP2_sequence = sequence[:1441] + 'G' + sequence[(1441 + 1):]
-    #     for j,snp_seq in enumerate([sequence, SNP1_sequence, SNP2_sequence]):
-    #         sequence = snp_seq
-    #         records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])
-
-    #         preds = {}
-    #         for record in records:
-    #             seq = record['seq']
-    #             idx = record['idx']
-    #             chunk_id = record['chunk_id']
-
-    #             X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-    #             X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-
-    #             y_pred = model.predict(X)
-    #             y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
-    #             y_pred = y_pred[:,:,label_to_index['Phos_ST']]
-
-    #             for i in idx:
-    #                 ix = i+chunk_id*(FLAGS.seq_len-2)//2
-    #                 preds[ix] = y_pred[0,i+1]
-
-    #             if chunk_id==0:
-    #                 cover_range = (0,chunk_size//4*3)
-    #             elif chunk_id==((len(sequence)-1)//-1):
-    #                 cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
-    #             else:
-    #                 cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
-
-    #             # only get gradient when the seq_idx fall in the range
-    #             if site >=cover_range[0] and site < cover_range[1]:
-    #                 # get gradient for specific ptm
-    #                 seq_idx = site - chunk_id*chunk_size//2 
-    #                 # emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], seq_idx,method='gradient')
-    #                 fig_name = 'figs/'+'_'.join([uid,str(site), 'Phos_ST'])
-    #                 # heatmap(emb_grads, seq_idx, fle=(fig_name+'_gradient.png', fig_name+'_local_gradient.png'))
-
-    #                 emb = emb_model(X)
-    #                 m_steps = 50
-    #                 alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
-    #                 # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
-    #                 # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
-    #                 # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-    #                 interpolated_emb, baseline = interpolate_emb(emb, alphas)
-    #                 emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], \
-    #                     seq_idx, interpolated_emb, method='integrated_gradient', emb=emb, baseline=baseline)
-    #                 fig_add_name = ['','_R1441C','_R1441G']
-    #                 zero_local = heatmap(emb_grads, seq_idx, fle=(fig_name+fig_add_name[j]+'_integrated_gradient.pdf',fig_name+fig_add_name[j]+'_local_integrated_gradient.pdf'))
-                
-    else:
-        with open('/local2/yuyan/PTM-Motif/Data/Musite_data/ptm/PTM_test.json') as f:
-            dat = json.load(f)
+    with open(FLAGS.data_path, 'r') as fp:
+        dat = list(SeqIO.parse(fp, 'fasta'))  
+    site = FLAGS.site-1          
+    for rec in tqdm(enumerate(dat)):  
+        uid = rec.id.split('|')[1]
+        sequence=str(rec.seq) 
         
-        for ptm_type in label2aa:
-            for k in dat:
-                sequence = dat[k]['seq']
-                records = cut_protein(sequence, FLAGS.seq_len, label2aa[ptm_type])
-                label = dat[k]['label']
+        records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])
+        preds = {}
+        for record in records:
+            seq = record['seq']
+            idx = record['idx']
+            chunk_id = record['chunk_id']
+            if chunk_id is None:
+                name_id = ''
+                chunk_id = 0
+            else:
+                name_id = '~'+str(chunk_id)
+            if FLAGS.graph:
+                adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
+                adj = np.expand_dims(adj, 0)
 
-                preds = {}
-                for record in records:
-                    seq = record['seq']
-                    idx = record['idx']
-                    chunk_id = record['chunk_id']
+            X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
+            if FLAGS.graph:
+                X = [tf.expand_dims(X, 0),adj, tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+            else:
+                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+            
+            if chunk_id==0:
+                cover_range = (0,chunk_size//4*3)
+            elif chunk_id==((len(sequence)-1)//-1):
+                cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
+            else:
+                cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
 
-                    X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-                    X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+            # only get gradient when the seq_idx fall in the range
+            
+            if site >=cover_range[0] and site < cover_range[1]:
+                # get gradient for specific ptm
+                seq_idx = site - chunk_id*chunk_size//2 
+                temp_label = FLAGS.ptm_type
+                pred_score =  model(X).numpy()
+                pred_score = pred_score.reshape(1, -1,13)
 
-                    # y_pred = model.predict(X)
-                    # y_pred = y_pred.reshape(1, FLAGS.seq_len, -1)
-                    # y_pred = y_pred[:,:,label_to_index[FLAGS.label]]
-
-                    # for i in idx:
-                    #     ix = i+chunk_id*(FLAGS.seq_len-2)
-                    #     preds[ix] = y_pred[0,i+1]
-
-                    if chunk_id==0:
-                        cover_range = (0,chunk_size//4*3)
-                    elif chunk_id==((len(sequence)-1)//-1):
-                        cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
-                    else:
-                        cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
-
-                    for l in label:
-                        seq_idx = l['site']
-                        # only get gradient when the seq_idx fall in the range
-                        if seq_idx >=cover_range[0] and seq_idx < cover_range[1] and l['ptm_type']==ptm_type:
-                            # get gradient for specific ptm
-                            seq_idx = seq_idx - chunk_id*chunk_size//2 +1# padding for zero-based
-                            # emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.label], seq_idx,method='gradient')
-                            fig_name = 'figs/'+'temp'#'_'.join([FLAGS.protein,str(FLAGS.seq_idx), FLAGS.label])
-                            # heatmap(emb_grads, seq_idx, fle=(fig_name+'_gradient.png', fig_name+'_local_gradient.png'))
-
-                            # get intergrated gradient for specific ptm
-                            emb = emb_model(X)
-                            m_steps = 50
-                            alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
-                            pad_baseline = [tf.expand_dims(['<PAD>']*FLAGS.seq_len, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-                            # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                            interpolated_emb, baseline = interpolate_emb(emb, alphas)
-                            if interpolated_emb is None:
-                                continue
-                            #TODO try <PAD>
-                            emb_grads, prob = get_gradients(X, emb_model, grad_model, label_to_index[ptm_type], \
-                                seq_idx, interpolated_emb, method='integrated_gradient', emb=emb, baseline=baseline)
-                            top5 = np.argsort(-emb_grads)[0][:5]
-                            top5_d = [abs(t_idx-seq_idx) > 17 for t_idx in top5]
-                            if any(top5_d) and prob.numpy() > 0.8:
-                                heatmap(emb_grads, seq_idx, fle=(fig_name+'_integrated_gradient.png',fig_name+'_local_integrated_gradient.png'))
-        # pprint(preds) Q3SYY2 342 glyco_N
+                print('The prediction scores of site %d for %s is %f'%(site+1, FLAGS.ptm_type, pred_score[0, seq_idx+1, label_to_index[temp_label]]))
+                fig_name = os.path.join(FLAGS.res_path, '_'.join([uid,str(site), FLAGS.ptm_type]))
+                emb = emb_model(X)
+                m_steps = 50
+                alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
+                # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
+                # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
+                # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
+                interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1)
+                if interpolated_emb is None:
+                    continue
+                emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[temp_label], \
+                    seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
+                # if prob>0.9:
+                zero_local = heatmap(emb_grads, 7, fle=(fig_name))
+  
 
 def interpolate_emb( emb, alphas, seq_idx, baseline_med='blank', baseline=None):
     # interpolate embedding and baseline
@@ -445,8 +315,6 @@ def make_gradcam_heatmap(model, pred_index=None):
     # For visualization purpose, we will also normalize the heatmap between 0 & 1
     heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
     return heatmap.numpy()
-
-
 
 
 if __name__ == '__main__':

@@ -29,7 +29,8 @@ def handle_flags():
     flags.DEFINE_string('suffix', '', 'model name suffix')
     flags.DEFINE_string('class_weight_fle',
             '/local2/yuyan/PTM-Motif/PTM-pattern-finder/analysis/res/class_weights.json', 'path to class weights')
-    
+    flags.DEFINE_string('ptm_type', None, 'ptm type to predict')
+
     flags.DEFINE_bool("multilabel", True, "multilabel or not (default: True)")
     flags.DEFINE_bool("binary", False, "Binary or not (default: False)")
     flags.DEFINE_bool("class_weights", True, "use class weights or not (default: True)")
@@ -49,6 +50,7 @@ def handle_flags():
     flags.DEFINE_integer("fill_cont", 5, "how many sequence should be considered as neighbour/2")
     flags.DEFINE_integer("n_fold", 5, "k-fold cross validation")
     flags.DEFINE_integer("d_model", 128, "k-fold cross validation")
+    flags.DEFINE_integer("site", None, "site for prediction")
 
 
     flags.DEFINE_integer('random_seed',

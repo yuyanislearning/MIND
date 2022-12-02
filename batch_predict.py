@@ -28,48 +28,18 @@ from src.model import TransFormerFixEmbed,  RNN_model, TransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
-
+OPTM=False
 handle_flags()
 
-fold = 15
-avg_weight = False
-
-graph = False
-alpha_shape = False
-AS_filter = False
-OPTM=True
-fasta_file = '/local2/yuyan/PTM-Motif/PTM-pattern-finder/predict/JC/JC.fasta'
 
 if not OPTM:
     label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
     'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
-    dat_dir = '/local2/yuyan/PTM-Motif/Data/Musite_data/ptm/PTM_test.json'
-    # dat_dir ='temp.json'
 else:
     label2aa = {"Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
         "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
         "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
-    dat_dir = '/local2/yuyan/PTM-Motif/Data/OPTM/PTM_test.json'
-
-# change it here
-class temp_flag():
-    def __init__(self, seq_len=514, d_model=128, batch_size=64, model='Transformer',\
-         neg_sam=False, dat_aug=False, dat_aug_thres=None, ensemble=False, random_ensemble=False, embedding=False, n_fold=None):
-        self.eval = True
-        self.seq_len = seq_len
-        self.graph = False
-        self.fill_cont = None
-        self.d_model = d_model
-        self.batch_size = batch_size
-        self.model = model
-        self.neg_sam = neg_sam
-        self.dat_aug = dat_aug
-        self.dat_aug_thres = dat_aug_thres
-        self.ensemble = ensemble
-        self.random_ensemble = random_ensemble
-        self.embedding = embedding
-        self.n_fold = n_fold
-
+    
 
 def ensemble_get_weights(PR_AUCs, unique_labels):
     weights = {ptm:None for ptm in unique_labels}
@@ -120,7 +90,7 @@ def cut_protein(sequence, seq_len):
 
 
 def main(argv):
-    FLAGS = temp_flag()
+    FLAGS = flags.FLAGS
     limit_gpu_memory_growth()
 
     # tf.config.run_functions_eagerly(True)
@@ -132,13 +102,13 @@ def main(argv):
     index_to_label = {i: str(label) for i, label in enumerate(unique_labels)}
     chunk_size = FLAGS.seq_len - 2
 
-    with open(model_name+'_PRAU.json') as f:
+    with open(FLAGS.pretrain_name +'_PRAU.json') as f:
         AUPR_dat = json.load(f)
     
     # models = [tf.keras.models.load_model(model_name)]
     models = [] # load models
-    for i in range(fold):#
-        models.append(tf.keras.models.load_model(model_name+'_fold_'+str(i)))
+    for i in range(FLAGS.n_fold):#
+        models.append(tf.keras.models.load_model(FLAGS.pretrain_name+'_fold_'+str(i)))
     # model = tf.keras.models.load_model(model_name)
 
     weights = ensemble_get_weights(AUPR_dat, unique_labels)
@@ -168,103 +138,76 @@ def main(argv):
     adjs = []
     sequences = []
     count=0
-    if fasta_file is not None:
-        with open(fasta_file, 'r') as fp:
-            dat = list(SeqIO.parse(fp, 'fasta'))            
-        for dat_count, rec in tqdm(enumerate(dat)):
-            uid = rec.id.split('|')[1]
-            sequence=str(rec.seq)
-            records = cut_protein(sequence, FLAGS.seq_len)
-
-    # else:
-    #     for dat_count, uid in tqdm(enumerate(dat)):
-    #         sequence = dat[uid]['seq']
-    #         records = cut_protein(sequence, FLAGS.seq_len)#
-            # if line =='A0A087WPF7.fa':
-            #     pdb.set_trace()
-            for record in records:
-                count+=1
-                seq = record['seq']
-                # idx = record['idx']
-                chunk_id = record['chunk_id']
-                seqs.append(seq)
-                chunk_ids.append(chunk_id)
-                X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-                pad_Xs.append(X)
-                uids.append(uid)
-                sequences.append(sequence)
-                # X = [tf.expand_dims(X, 0)] 
-                if graph:
-                    g_suffix = '_AS' if alpha_shape else ''
-                    id = uid + '~' + str(chunk_id) if len(records)>1 else uid
-                    adj = np.load('./temp/'+id+'_'+str(FLAGS.seq_len)+'_5'+g_suffix+'.npy', allow_pickle=True) 
-                    adjs.append(adj)
-                if count<64 and dat_count!=len(dat)-1:
-                    continue
-                pad_Xs = np.stack(pad_Xs, axis=0)
-                X = [pad_Xs]
-                if graph:
-                    adjs = np.stack(adjs, axis=0)
-                    X.append(adjs)
-                
-                
-                batch_size = pad_Xs.shape[0]
-                X.append(np.zeros((batch_size, 514, 128)))
-                
-                if fold>0:
-                    for j in range(fold):#fold 
-                        y_pred = models[j](X)#*weights[ptm][j]                    
-                        y_pred = tf.reshape(y_pred, (batch_size, FLAGS.seq_len, -1)).numpy()
-                        if avg_weight:
-                            temp_weight = 1/fold
-                        else:
-                            temp_weight = np.array([weights[p][j] for p in weights])
-                        y_pred = y_pred*temp_weight#TODO 
-                        if j==0:
-                            y_pred_sum = y_pred
-                        else:
-                            y_pred_sum += y_pred
+    with open(FLAGS.data_path, 'r') as fp:
+        dat = list(SeqIO.parse(fp, 'fasta'))            
+    for dat_count, rec in tqdm(enumerate(dat)):
+        uid = rec.id.split('|')[1]
+        sequence=str(rec.seq)
+        records = cut_protein(sequence, FLAGS.seq_len)
+        for record in records:
+            count+=1
+            seq = record['seq']
+            chunk_id = record['chunk_id']
+            seqs.append(seq)
+            chunk_ids.append(chunk_id)
+            X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
+            pad_Xs.append(X)
+            uids.append(uid)
+            sequences.append(sequence)
+            # if FLAGS.graph:
+            #     id = uid + '~' + str(chunk_id) if len(records)>1 else uid
+            #     adj = np.load('./temp/'+id+'_'+str(FLAGS.seq_len)+'_5'+'.npy', allow_pickle=True) 
+            #     adjs.append(adj)
+            if count<FLAGS.batch_size and dat_count!=len(dat)-1:
+                continue
+            pad_Xs = np.stack(pad_Xs, axis=0)
+            X = [pad_Xs]
+            # if FLAGS.graph:
+            #     adjs = np.stack(adjs, axis=0)
+            #     X.append(adjs)
+            
+            
+            batch_size = pad_Xs.shape[0]
+            X.append(np.zeros((batch_size, 514, 128)))
+            
+            for j in range(FLAGS.n_fold):#fold 
+                y_pred = models[j](X)#*weights[ptm][j]                    
+                y_pred = tf.reshape(y_pred, (batch_size, FLAGS.seq_len, -1)).numpy()
+                temp_weight = np.array([weights[p][j] for p in weights])
+                y_pred = y_pred*temp_weight#TODO 
+                if j==0:
+                    y_pred_sum = y_pred
                 else:
-                    y_pred = model(X)
-                    y_pred_sum = y_pred.numpy().reshape(batch_size, FLAGS.seq_len, -1)
+                    y_pred_sum += y_pred
 
+            for ptm in label2aa.keys():
+                for ch in range(batch_size):
+                    if chunk_ids[ch]==0:#TODO
+                        cover_range = (0,quar_chunk_size*3)
+                    elif chunk_ids[ch]==((len(sequences[ch])-1)//half_chunk_size-1):
+                        cover_range = (quar_chunk_size, len(seqs[ch]))
+                    elif chunk_ids[ch] is None:
+                        cover_range = (0,515)
+                        chunk_ids[ch] = 0
+                    else:
+                        cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
+                    idx = [j for j in range(len((seqs[ch]))) if (seqs[ch][j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
+                    # idx = [j for j in range(len((seq))) if seq[j] in label2aa[ptm]]
+                    for i in idx:
+                        ix = i+chunk_ids[ch]*(FLAGS.seq_len-2)//2
+                        y_preds[str(uids[ch])+'_'+str(ix)+'_'+ptm] = str(y_pred_sum[ch, i+1,label_to_index[ptm]])
 
+            seqs = []
+            chunk_ids = []
+            uids = []
+            pad_Xs = []
+            adjs = []
+            count=0
 
-                for ptm in label2aa.keys():
-                    for ch in range(batch_size):
-
-                        if chunk_ids[ch]==0:#TODO
-                            cover_range = (0,quar_chunk_size*3)
-                        elif chunk_ids[ch]==((len(sequences[ch])-1)//half_chunk_size-1):
-                            cover_range = (quar_chunk_size, len(seqs[ch]))
-                        elif chunk_ids[ch] is None:
-                            cover_range = (0,515)
-                            chunk_ids[ch] = 0
-                        else:
-                            cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
-                        idx = [j for j in range(len((seqs[ch]))) if (seqs[ch][j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
-
-                        # idx = [j for j in range(len((seq))) if seq[j] in label2aa[ptm]]
-                        for i in idx:
-                            ix = i+chunk_ids[ch]*(FLAGS.seq_len-2)//2
-                            y_preds[str(uids[ch])+'_'+str(ix)+'_'+ptm] = str(y_pred_sum[ch, i+1,label_to_index[ptm]])
-
-                seqs = []
-                chunk_ids = []
-                uids = []
-                pad_Xs = []
-                adjs = []
-                count=0
-
-        with open('/local2/yuyan/PTM-Motif/Data/Musite_data/PTM_test/eval/'+suffix+'_JC.json','w') as fw:
-            json.dump(y_preds, fw)
+    with open(os.path.join(FLAGS.res_path,'result.json'),'w') as fw:
+        json.dump(y_preds, fw)
 
     
-
-# def create_baseline(seq_len):
-#     # create an all padding sequence
-#     return np.array(seq_len * [additional_token_to_index['<PAD>']])
-
 def pad_X( X, seq_len):
     return np.array(X + (seq_len - len(X)) * [additional_token_to_index['<PAD>']])
 
