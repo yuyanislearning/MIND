@@ -20,7 +20,12 @@ Run the following to build a docker image
 ```bash
 mkdir docker_build
 cd docker_build
+```
+```bash
 mv [path to Downloaded dockerfile]/Dockerfile ./
+```
+You need to replace [path to Downloaded dockerfile] with your file path of the Dockerfile you downloaded. 
+```bash
 docker build -t yuyanislearning/mind:1.0 .
 ```
 Then run the following to run a docker container
