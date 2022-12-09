@@ -10,7 +10,8 @@ from sklearn.metrics import  precision_recall_curve, auc, roc_auc_score,  confus
 from .tokenization import  n_tokens
 
 import sys
-from src.transformer import  EncoderLayer, create_padding_mask, graph_seq_attn
+from src.transformer import  EncoderLayer, create_padding_mask
+import pdb
 
 class Raw_model():
     def __init__(self):
@@ -117,7 +118,7 @@ class Raw_model():
 
 
 class LSTMTransFormer(Raw_model):
-    def __init__(self, FLAGS,model_name,  optimizer,  num_layers,  num_heads, dff, rate, binary, unique_labels, split_head, global_heads, fill_cont):
+    def __init__(self, FLAGS,model_name,  optimizer,  num_layers,  num_heads, dff, rate, binary, unique_labels,  fill_cont):
         Raw_model.__init__(self)
         self.optimizer = optimizer
         self.d_model = FLAGS.d_model
@@ -126,20 +127,17 @@ class LSTMTransFormer(Raw_model):
         self.FLAGS=FLAGS
         self.embedding = tf.keras.layers.Embedding(n_tokens, self.d_model, name='embedding')
 
-        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont, name='encoder_layer_'+str(n_l))
+        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate,  fill_cont, name='encoder_layer_'+str(n_l))
                         for n_l in range(num_layers)]
-        self.graph_seq_attn = graph_seq_attn(self.d_model)
+        # self.graph_seq_attn = graph_seq_attn(self.d_model)
         self.dropout = tf.keras.layers.Dropout(rate)
         self.binary = binary
         self.unique_labels = unique_labels
-        self.reg = FLAGS.l2_reg
 
     def create_model(self, graph=False):
         input_seq = keras.layers.Input(shape = (None,), dtype = np.int32, name = 'input-seq')
-        if graph and not self.FLAGS.gt:
+        if graph:
             adj_input = keras.layers.Input(shape=(None, None), name = 'input-adj', dtype=np.int32)
-        if self.FLAGS.gt:
-            adj_input = keras.layers.Input(shape = (None, 20), name  ='graph_encoding')
         attention_weights = {}
 
         mask = create_padding_mask(input_seq)
@@ -169,7 +167,7 @@ class LSTMTransFormer(Raw_model):
         model_input = [input_seq]
         if graph:
             model_input.append(adj_input)
-
+        model_input.append(keras.layers.Input(shape = (None,), dtype = np.int32, name = 'padding')) # placeholder
         if self.FLAGS.inter:
             model_input.append(my_emb)
         model = keras.models.Model(inputs = model_input , outputs = out) 
@@ -184,11 +182,11 @@ class LSTMTransFormer(Raw_model):
 
 
 class TransFormerFixEmbed():
-    def __init__(self, d_model,  num_layers, num_heads, dff, rate, split_head, global_heads, fill_cont, lstm=False):
+    def __init__(self, d_model,  num_layers, num_heads, dff, rate,fill_cont, lstm=False):
         self.d_model = d_model
         self.num_layers = num_layers
         self.lstm = lstm
-        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate, split_head, global_heads, fill_cont)
+        self.enc_layers = [EncoderLayer(self.d_model, num_heads, dff, rate,  fill_cont)
                         for _ in range(num_layers)]
 
         self.linear = keras.layers.Dense(self.d_model)

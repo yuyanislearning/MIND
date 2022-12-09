@@ -20,9 +20,9 @@ import re
 
 import pdb
 
-from src.utils import get_class_weights,  limit_gpu_memory_growth, handle_flags
+from src.utils import get_class_weights, handle_flags
 from src import utils
-from src.model import TransFormerFixEmbed,  RNN_model, LSTMTransFormer
+from src.model import LSTMTransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
@@ -67,11 +67,11 @@ def cut_protein(sequence, seq_len, aa):
     return records
 
 def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
-    if FLAGS.model=='LSTMTransformer':
-        model = LSTMTransFormer(FLAGS,FLAGS.model,optimizer,  \
-            num_layers=FLAGS.n_lstm, seq_len=FLAGS.seq_len, num_heads=8,dff=512, rate=0.1,binary=False,\
-            unique_labels=unique_labels, split_head=FLAGS.split_head, global_heads=FLAGS.global_heads, fill_cont=FLAGS.fill_cont)
-        model.create_model(FLAGS.seq_len, graph=FLAGS.graph)    # Optimization settings.
+    if True:#FLAGS.model=='LSTMTransformer':
+        model = LSTMTransFormer(FLAGS,'LSTMTransformer',optimizer,  \
+            num_layers=FLAGS.n_lstm,  num_heads=8,dff=512, rate=0.1,binary=False,\
+            unique_labels=unique_labels,  fill_cont=FLAGS.fill_cont)
+        model.create_model(graph=FLAGS.graph)    # Optimization settings.
         for layer in pretrain_model.layers:
             if len(layer.get_weights())!=0 and layer.name!='my_last_dense' and layer.name!='embedding':
                 if layer.name=='encoder_layer':
@@ -83,7 +83,6 @@ def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
 
 def main(argv):
     FLAGS = flags.FLAGS
-    limit_gpu_memory_growth()
 
     label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
     'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
@@ -107,8 +106,8 @@ def main(argv):
     with open(FLAGS.data_path, 'r') as fp:
         dat = list(SeqIO.parse(fp, 'fasta'))  
     site = FLAGS.site-1          
-    for rec in tqdm(enumerate(dat)):  
-        uid = rec.id.split('|')[1]
+    for rec in tqdm(dat):  
+        uid = rec.id
         sequence=str(rec.seq) 
         
         records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])

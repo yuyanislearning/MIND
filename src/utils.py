@@ -22,6 +22,8 @@ def handle_flags():
             '3', "The setting for TF_CPP_MIN_LOG_LEVEL (default: 3)")
     flags.DEFINE_string('data_path',
             '../Data/Musite_data/ptm', 'path to data dir')
+    flags.DEFINE_string('res_path',
+            None, 'path to store output')            
     flags.DEFINE_string('adj_dir',
             '/local2/yuyan/PTM-Motif/Data/Musite_data/Structure/pdb/AF_updated_cont_map/', 'path to structure adjency matrix')
     flags.DEFINE_string('pretrain_name',

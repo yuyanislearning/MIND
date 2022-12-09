@@ -20,13 +20,9 @@ import re
 from sklearn.metrics import f1_score, precision_recall_curve, auc, roc_auc_score, accuracy_score, confusion_matrix, average_precision_score
 from os.path import exists
 
-
-
-from src.utils import get_class_weights,  limit_gpu_memory_growth, handle_flags
+from src.utils import get_class_weights, handle_flags
 from src import utils
-from src.model import TransFormerFixEmbed,  RNN_model, TransFormer
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
-from src.transformer import  positional_encoding
 
 OPTM=False
 handle_flags()
@@ -91,7 +87,6 @@ def cut_protein(sequence, seq_len):
 
 def main(argv):
     FLAGS = flags.FLAGS
-    limit_gpu_memory_growth()
 
     # tf.config.run_functions_eagerly(True)
 
