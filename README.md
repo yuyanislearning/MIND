@@ -39,10 +39,11 @@ MIND allows batch predictions for multiple proteins. A fasta files contains all 
 A json file with ptm information (uid_site_PtmType) and prediction scores will be return.
 An example code is shown below:
 ```bash
+mkdir temp
 python batch_predict.py \
   --pretrain_name saved_model/MIND_fifteenfold \
-  --data_path [path to fasta file] \
-  --res_path [path to store result] \
+  --data_path  sample/Q5S007.fa\
+  --res_path temp \
   --n_fold 15 
 ```
 
@@ -56,10 +57,10 @@ The following code will run the saliency analysis and return a figure of surrond
 python predict_saliency.py \
   --inter \
   --pretrain_name saved_model/MIND_fifteenfold \
-  --data_path [path to fasta file] \
-  --res_path [path to store result] \
-  --site [site of PTM] \
-  --ptm_type [PTM type] 
+  --data_path sample/P04150.fa \
+  --res_path temp \
+  --site 203 \
+  --ptm_type Phos_ST
 ```
 
 ## examine SNP effect
@@ -77,3 +78,6 @@ python PTMSNP.py \
 ```
 
 ## Cite
+
+## Contact Email
+yuyan666@g.ucla.edu
