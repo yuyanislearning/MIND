@@ -83,35 +83,40 @@ def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
 
 def main(argv):
     FLAGS = flags.FLAGS
-
     label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
-    'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'}
+    'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST'} # dict from label to aa
     labels = list(label2aa.keys())
     # get unique labels
     unique_labels = sorted(set(labels))
     label_to_index = {str(label): i for i, label in enumerate(unique_labels)}
     index_to_label = {i: str(label) for i, label in enumerate(unique_labels)}
 
-    model = tf.keras.models.load_model(FLAGS.pretrain_name+'_fold_0')
+    model = tf.keras.models.load_model(FLAGS.pretrain_name+'_fold_0') # load the model 
     
     emb_model = keras.models.Model(
         [model.inputs], [model.get_layer('embedding').output]
-    )
+    )# get the model that produce the protein embedding from the input protein sequence
+
     optimizer = tf.keras.optimizers.Adam(
                         learning_rate=FLAGS.learning_rate, amsgrad=True)
-    grad_model = build_model_graph(FLAGS, optimizer , unique_labels, model).model
+    
+    grad_model = build_model_graph(FLAGS, optimizer , unique_labels, model).model # get the model that takes in the embeddings
     
     chunk_size = FLAGS.seq_len - 2
 
     with open(FLAGS.data_path, 'r') as fp:
-        dat = list(SeqIO.parse(fp, 'fasta'))  
-    site = FLAGS.site-1          
-    for rec in tqdm(dat):  
+        dat = list(SeqIO.parse(fp, 'fasta'))  # input data
+
+    site = FLAGS.site-1     
+
+    for rec in tqdm(dat):
+
         uid = rec.id
         sequence=str(rec.seq) 
         
-        records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST'])
+        records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST']) # chunk the protein into segments
         preds = {}
+
         for record in records:
             seq = record['seq']
             idx = record['idx']
@@ -121,21 +126,23 @@ def main(argv):
                 chunk_id = 0
             else:
                 name_id = '~'+str(chunk_id)
+            
             if FLAGS.graph:
                 adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
                 adj = np.expand_dims(adj, 0)
 
-            X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
+            X = pad_X(tokenize_seq(seq), FLAGS.seq_len) # tokenized and pad the input
             if FLAGS.graph:
                 X = [tf.expand_dims(X, 0),adj, tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
             else:
-                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])] # [pad_x, pos_enc]
             
-            if chunk_id==0:
+            # to identify the range for prediction
+            if chunk_id==0: # for beginning chunk
                 cover_range = (0,chunk_size//4*3)
-            elif chunk_id==((len(sequence)-1)//-1):
+            elif chunk_id==((len(sequence)-1)//-1): # for the ending chunk
                 cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
-            else:
+            else: # the rest
                 cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
 
             # only get gradient when the seq_idx fall in the range
@@ -143,19 +150,20 @@ def main(argv):
             if site >=cover_range[0] and site < cover_range[1]:
                 # get gradient for specific ptm
                 seq_idx = site - chunk_id*chunk_size//2 
-                temp_label = FLAGS.ptm_type
-                pred_score =  model(X).numpy()
+                temp_label = FLAGS.ptm_type 
+                pred_score =  model(X).numpy() # make predictions
                 pred_score = pred_score.reshape(1, -1,13)
 
+                # integrated gradients
                 print('The prediction scores of site %d for %s is %f'%(site+1, FLAGS.ptm_type, pred_score[0, seq_idx+1, label_to_index[temp_label]]))
                 fig_name = os.path.join(FLAGS.res_path, '_'.join([uid,str(site), FLAGS.ptm_type]))
-                emb = emb_model(X)
-                m_steps = 50
+                emb = emb_model(X) # Get embedding
+                m_steps = 50 # how many intervals to create
                 alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
                 # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
                 # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
                 # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1)
+                interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1) # get the interpolated embedding
                 if interpolated_emb is None:
                     continue
                 emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[temp_label], \
