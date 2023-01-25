@@ -28,6 +28,8 @@ from src.transformer import  positional_encoding
 
 
 handle_flags()
+n_aa_var = 21
+half_aa_var = n_aa_var // 2
 
 def cut_protein(sequence, seq_len, aa):
     # cut the protein if it is longer than chunk_size
@@ -167,13 +169,15 @@ def main(argv):
                 if interpolated_emb is None:
                     continue
                 emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[temp_label], \
-                    seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(21,1,1)), baseline=baseline)
+                    seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(n_var_aa,1,1)), baseline=baseline)
                 # if prob>0.9:
                 zero_local = heatmap(emb_grads, 7, fle=(fig_name))
   
 
 def interpolate_emb( emb, alphas, seq_idx, baseline_med='blank', baseline=None):
     # interpolate embedding and baseline
+    # emb is the embedding from the protein sequence, a matrix of (seq_len, embedding dimension)
+    # return a interpolated_emb embedding which consists of intervals from baseline for each AA interested
     if baseline is None:
         baseline = get_baseline(emb, baseline_med, seq_idx)
         # baseline = np.zeros(emb.shape)
@@ -183,31 +187,33 @@ def interpolate_emb( emb, alphas, seq_idx, baseline_med='blank', baseline=None):
         baseline = get_baseline(emb, baseline_med, seq_idx, baseline)
         if baseline is None:
             return None, None
-    alphas_x = alphas[:, tf.newaxis, tf.newaxis, tf.newaxis]
+    alphas_x = alphas[:, tf.newaxis, tf.newaxis, tf.newaxis] 
     baseline = tf.cast(baseline, emb.dtype)
     emb_x = tf.expand_dims( emb, 0)
     baseline_x = tf.expand_dims(baseline, 0)
-    emb_x = tf.tile(emb_x, (1,21,1,1))# match the 21 aa selected in baseline
+    emb_x = tf.tile(emb_x, (1,n_aa_var,1,1))# match the 21 aa selected in baseline
     delta = emb_x - baseline_x #(1, 21, seq_len, dim)
     embs = baseline_x + alphas_x * delta #(alpha, 21, seq_len, dim)
     seq_len, dim = embs.shape[2], embs.shape[3]
-    embs = tf.reshape(embs, (len(alphas)*21, seq_len, dim))# reshape to batch first
+    embs = tf.reshape(embs, (len(alphas)*n_aa_var, seq_len, dim))# reshape to batch first
     # baseline_x = tf.reshape(baseline_x, (len(alphas)*21, seq_len, dim))
     return embs, baseline
 
 def get_baseline(emb, baseline_med, seq_idx, baseline=None):
-    if seq_idx-10<0 or seq_idx+11>emb.shape[1]:
+    # get the baseline of all AAs interested
+    # seq_idx is the index of the PTM happending
+    if seq_idx-half_aa_var<0 or seq_idx+half_aa_var+1>emb.shape[1]:
         return None
     if baseline_med =='blank':
-        tile_emb = tf.tile(emb, (21,1,1)).numpy() # duplicate the batch
-        for i in range(21):
-            tile_emb[i,seq_idx-10+i,:] = 0 # set as zero for specific aa
+        tile_emb = tf.tile(emb, (n_aa_var,1,1)).numpy() # duplicate the batch, (21, ?, ?)
+        for i in range(n_aa_var):
+            tile_emb[i,seq_idx-half_aa_var+i,:] = 0 # set as zero for specific aa
         
     elif baseline_med == 'pad':
-        tile_emb = tf.tile(emb, (21,1,1)).numpy()
-        baseline = tf.tile(baseline, (21,1,1)).numpy()
-        for i in range(21):
-            tile_emb[i, seq_idx-10+i, :] = baseline[i, seq_idx-10+i, :] # replace with pad baseline
+        tile_emb = tf.tile(emb, (n_aa_var,1,1)).numpy()
+        baseline = tf.tile(baseline, (n_aa_var,1,1)).numpy()
+        for i in range(n_aa_var):
+            tile_emb[i, seq_idx-half_aa_var+i, :] = baseline[i, seq_idx-half_aa_var+i, :] # replace with pad baseline
         
     tile_emb = tf.convert_to_tensor(tile_emb)
     return tile_emb
@@ -241,23 +247,23 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
         # test is pred is > pred_thres
         
         # batching since it's too big
-        alpha, seq_len, dim = embedding.shape[0]//21, embedding.shape[1],embedding.shape[2]
-        embedding = tf.reshape(embedding, (alpha, 21, seq_len, dim))
+        alpha, seq_len, dim = embedding.shape[0]//n_var_aa, embedding.shape[1],embedding.shape[2]
+        embedding = tf.reshape(embedding, (alpha, n_var_aa, seq_len, dim))
         final_grads = []
-        for i in range(21):
+        for i in range(n_var_aa):
             with tf.GradientTape() as tape:
                 embed = embedding[:,i,:,:] #(alpha,)
                 tape.watch(embed)
                 temp_X = [ tf.tile(x, tf.constant([alpha]+(len(x.shape)-1)*[1])) for x in X] + [embed] # tile sequence x to match emb
                 out_pred = grad_model(temp_X)
-                out_pred = tf.reshape(out_pred, (51, -1, 13))
+                out_pred = tf.reshape(out_pred, (51, -1, 13))# (batch, seq_len, 13)
                 top_class = out_pred[:,seq_idx, top_pred_idx]
                 
 
             grads = tape.gradient(top_class, embed) # (alpha, seq, dim)
             grads = (grads[:-1] + grads[1:]) / tf.constant(2.0) # calculate integration
             integrated_grads = tf.math.reduce_mean(grads, axis = 0) * (emb[i,:,:] - baseline[i,:,:])  # integration
-            final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-10+i, :], axis=-1).numpy()) #norm of the specific aa
+            final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-half_aa_var+i, :], axis=-1).numpy()) #norm of the specific aa
 
         return np.array(final_grads)
 
