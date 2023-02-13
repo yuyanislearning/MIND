@@ -75,7 +75,7 @@ def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
             unique_labels=unique_labels,  fill_cont=FLAGS.fill_cont)
         model.create_model(graph=FLAGS.graph)    # Optimization settings.
         for layer in pretrain_model.layers:
-            if len(layer.get_weights())!=0 and layer.name!='my_last_dense' and layer.name!='embedding':
+            if len(layer.get_weights())!=0  and layer.name!='embedding':
                 if layer.name=='encoder_layer':
                     model.model.get_layer(name='encoder_layer_0').set_weights(layer.get_weights())
                 else:
@@ -169,7 +169,7 @@ def main(argv):
                 if interpolated_emb is None:
                     continue
                 emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[temp_label], \
-                    seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(n_var_aa,1,1)), baseline=baseline)
+                    seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(n_aa_var,1,1)), baseline=baseline)
                 # if prob>0.9:
                 zero_local = heatmap(emb_grads, 7, fle=(fig_name))
   
@@ -247,10 +247,10 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
         # test is pred is > pred_thres
         
         # batching since it's too big
-        alpha, seq_len, dim = embedding.shape[0]//n_var_aa, embedding.shape[1],embedding.shape[2]
-        embedding = tf.reshape(embedding, (alpha, n_var_aa, seq_len, dim))
+        alpha, seq_len, dim = embedding.shape[0]//n_aa_var, embedding.shape[1],embedding.shape[2]
+        embedding = tf.reshape(embedding, (alpha, n_aa_var, seq_len, dim))
         final_grads = []
-        for i in range(n_var_aa):
+        for i in range(n_aa_var):
             with tf.GradientTape() as tape:
                 embed = embedding[:,i,:,:] #(alpha,)
                 tape.watch(embed)
@@ -265,6 +265,7 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
             integrated_grads = tf.math.reduce_mean(grads, axis = 0) * (emb[i,:,:] - baseline[i,:,:])  # integration
             final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-half_aa_var+i, :], axis=-1).numpy()) #norm of the specific aa
 
+        pdb.set_trace()
         return np.array(final_grads)
 
 def heatmap(a, highlight_idx, fle):
