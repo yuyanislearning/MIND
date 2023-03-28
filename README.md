@@ -3,7 +3,7 @@
 # MIND-S AI4PTM
 <img src='GA.png'>
 
-MIND (Multilabel INterpretable Deep learning method for PTM prediction) is a deep learning tool for making PTM predictions based on protein sequence, or protein structure. MIND-S features interpretability through evaluating the saliency for each input residual. MIND can also be utilized as a tool for evaluating effects of genetic mutation (e.g. SNP) on PTM. The manuscript is in press and link to it will be added as soon as it's online.
+MIND-S (Multilabel INterpretable Deep learning method for PTM prediction) is a deep learning tool for making PTM predictions based on protein sequence, or protein structure. MIND-S features interpretability of the model through evaluating the importance for each input residual to identify the important residual for making a prediction. MIND-S can also be utilized as a tool for evaluating effects of mutations (e.g. SNPs) that eventually affect protein sequence. By comparing the PTM predictions between wildtype and mutant protein, MIND-S can give hint on whether the mutation will affect PTMs.
 
 ## Set up
 Install MIND:
@@ -11,6 +11,8 @@ Install MIND:
 git clone https://github.com/yuyanislearning/MIND.git
 cd MIND
 ```
+
+We suggest building environment via docker or conda or using platforms with tensorflow2 installed.
 
 ### Build environment from docker file (Optional)
 We provide a Dockerfile which directly sets up the tensorflow and relevant package. More information about docker can be found [here](https://www.docker.com/). 
@@ -33,6 +35,13 @@ Then run the following to run a docker container
 docker run --gpus all -it --rm -v [Path to your working directory, need to contain MIND]:/workspace yuyanislearning/mind:1.0
 ```
 
+### Build environment with conda (Optional)
+Follow the instruction to install [tensorflow2](https://www.tensorflow.org/install/pip).
+
+Install required packages:
+```bash
+pip install -r requirement
+```
 
 ## Make predictions
 MIND allows batch predictions for multiple proteins. A fasta files contains all protein sequence can be used as the input with run the following code.
