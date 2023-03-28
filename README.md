@@ -80,7 +80,7 @@ python PTMSNP.py \
 ## Cite
 Please cite the following article for usage. 
 
-MIND-S is a deep-learning prediction model for elucidating protein post-translational modifications in human diseases. 
+**MIND-S is a deep-learning prediction model for elucidating protein post-translational modifications in human diseases. **
 
 [Cell Reports Methods, 2023](https://doi.org/10.1016/j.crmeth.2023.100430)
 
