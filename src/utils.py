@@ -32,6 +32,7 @@ def handle_flags():
     flags.DEFINE_string('class_weight_fle',
             '/local2/yuyan/PTM-Motif/PTM-pattern-finder/analysis/res/class_weights.json', 'path to class weights')
     flags.DEFINE_string('ptm_type', None, 'ptm type to predict')
+    flags.DEFINE_string('snp', 'snp', 'snp')
 
     flags.DEFINE_bool("multilabel", True, "multilabel or not (default: True)")
     flags.DEFINE_bool("binary", False, "Binary or not (default: False)")
@@ -61,6 +62,20 @@ def handle_flags():
             1e-3, 'Learning rate while training (default: 1e-3)')
     FLAGS = flags.FLAGS
 
+def limit_gpu_memory_growth():
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if gpus:
+        # Restrict TensorFlow to only use the first GPU
+        try:
+            tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+            tf.config.experimental.set_memory_growth(gpus[0], True)
+            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPU")
+        except RuntimeError as e:
+            # Visible devices must be set before GPUs have been initialized
+          print(e)
+          return False
+    return True
 
 class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M   
     def __init__(self, file_name, FLAGS, shuffle=True,ind=None, eval=False, binary=False, class_weights=None, val=False):

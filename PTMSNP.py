@@ -29,7 +29,7 @@ import pdb
 
 from src.utils import get_class_weights,  limit_gpu_memory_growth, handle_flags
 from src import utils
-from src.model import TransFormerFixEmbed,  RNN_model, TransFormer
+from src.model import TransFormerFixEmbed
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 from src.transformer import  positional_encoding
 
@@ -146,7 +146,7 @@ def main(argv):
         AUPR_dat = json.load(f)
     
     models = [] # load models
-    for i in range(FLAGS.n_foldfold):
+    for i in range(FLAGS.n_fold):
         models.append(tf.keras.models.load_model(FLAGS.pretrain_name+'_fold_'+str(i)))#
 
     weights = ensemble_get_weights(AUPR_dat, unique_labels)
@@ -246,9 +246,9 @@ def main(argv):
             for i in idx:
                 ix = i+chunk_id*(FLAGS.seq_len-2)//2 +1
                 y_preds_mut[str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
-    with open(os.path.join(FLAGS.res_dir, uid+'_'+SNP_wt+str(SNP_site)+SNP_var+'.json'),'w') as fw:
+    with open(os.path.join(FLAGS.res_path, uid+'_'+SNP_wt+str(SNP_site)+SNP_var+'.json'),'w') as fw:
         json.dump(y_preds_mut, fw)
-    with open(os.path.join(FLAGS.res_dir, uid+'.json'),'w') as fw:
+    with open(os.path.join(FLAGS.res_path, uid+'.json'),'w') as fw:
         json.dump(y_preds, fw)
 
 
