@@ -1,6 +1,7 @@
-Biopython
-spektral
-tensorflow_addons
+numpy==1.23.5
+Biopython==1.81
+spektral==1.2.0
+tensorflow==2.11.0
+tensorflow_addons==0.20.0
 matplotlib
 seaborn
-numpy==1.18.5
