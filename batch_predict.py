@@ -119,7 +119,6 @@ def main(argv):
         #     sequence = str(rec.seq)
         #     uid = str(rec.id)
 
-        
     # for i in range(1):#place holder
     # with open('/workspace/PTM/Data/OPTM/nonoverlap_uid.txt') as f:    
     #     for line in tqdm(f):
