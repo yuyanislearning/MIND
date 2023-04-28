@@ -7,7 +7,7 @@ import os
 import sys
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_addons as tfa
+# import tensorflow_addons as tfa
 from datetime import datetime
 from tqdm import tqdm
 from pprint import pprint
@@ -75,7 +75,7 @@ def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
             unique_labels=unique_labels,  fill_cont=FLAGS.fill_cont)
         model.create_model(graph=FLAGS.graph)    # Optimization settings.
         for layer in pretrain_model.layers:
-            if len(layer.get_weights())!=0  and layer.name!='embedding':
+            if len(layer.get_weights())!=0 and layer.name!='embedding':
                 if layer.name=='encoder_layer':
                     model.model.get_layer(name='encoder_layer_0').set_weights(layer.get_weights())
                 else:
@@ -83,6 +83,9 @@ def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
     print(model.model.summary())
     return model   
 
+'''from knockknock import email_sender
+
+@email_sender(recipient_emails="<xinr77@gmail.com>", sender_email="<xinr@g.ucla.edu>")'''
 def main(argv):
     FLAGS = flags.FLAGS
     label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
@@ -155,78 +158,81 @@ def main(argv):
                 temp_label = FLAGS.ptm_type 
                 pred_score =  model(X).numpy() # make predictions
                 pred_score = pred_score.reshape(1, -1,13)
-
+                # pdb.set_trace()
                 # integrated gradients
                 print('The prediction scores of site %d for %s is %f'%(site+1, FLAGS.ptm_type, pred_score[0, seq_idx+1, label_to_index[temp_label]]))
-                fig_name = os.path.join(FLAGS.res_path, '_'.join([uid,str(site), FLAGS.ptm_type]))
+                fig_name = os.path.join(FLAGS.res_path, '_'.join([uid,str(site+1), FLAGS.ptm_type])) # EDIT
                 emb = emb_model(X) # Get embedding
                 m_steps = 50 # how many intervals to create
                 alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
                 # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
                 # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
                 # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
-                interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1) # get the interpolated embedding
+                
+                # account for PTM hapenning within the first 10 and last 10 positions on the sequence
+                n_aa_f, n_aa_b = half_aa_var, half_aa_var
+                if len(sequence) -1- site < half_aa_var:
+                    n_aa_b = len(sequence) - 1- site
+                elif site-half_aa_var<0:
+                    n_aa_f = site
+                n_aa_total = n_aa_f+n_aa_b+1
+
+                interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1, n_aa_f, n_aa_total) # get the interpolated embedding
                 if interpolated_emb is None:
                     continue
-                emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[temp_label], \
-                    seq_idx+1, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(n_aa_var,1,1)), baseline=baseline)
+                emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.ptm_type], \
+                            seq_idx+1, n_aa_f, n_aa_total, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(n_aa_total,1,1)), baseline=baseline)
                 # if prob>0.9:
-                zero_local = heatmap(emb_grads, 7, fle=(fig_name))
+                zero_local = saliencyplot(emb_grads, n_aa_f, n_aa_b,fle=(fig_name))
   
 
-def interpolate_emb( emb, alphas, seq_idx, baseline_med='blank', baseline=None):
+def interpolate_emb( emb, alphas, seq_idx,  n_aa_f, n_aa_total, baseline_med='blank', baseline=None):
     # interpolate embedding and baseline
     # emb is the embedding from the protein sequence, a matrix of (seq_len, embedding dimension)
     # return a interpolated_emb embedding which consists of intervals from baseline for each AA interested
     if baseline is None:
-        baseline = get_baseline(emb, baseline_med, seq_idx)
+        baseline = get_baseline(emb, baseline_med, seq_idx,  n_aa_f, n_aa_total)
         # baseline = np.zeros(emb.shape)
-        if baseline is None:
-            return None, None
     else:
-        baseline = get_baseline(emb, baseline_med, seq_idx, baseline)
-        if baseline is None:
-            return None, None
+        baseline = get_baseline(emb, baseline_med, seq_idx, n_aa_f, n_aa_total, baseline)
+    
     alphas_x = alphas[:, tf.newaxis, tf.newaxis, tf.newaxis] 
     baseline = tf.cast(baseline, emb.dtype)
     emb_x = tf.expand_dims( emb, 0)
     baseline_x = tf.expand_dims(baseline, 0)
-    emb_x = tf.tile(emb_x, (1,n_aa_var,1,1))# match the 21 aa selected in baseline
+    emb_x = tf.tile(emb_x, (1,n_aa_total,1,1))# match the 21 aa selected in baseline
     delta = emb_x - baseline_x #(1, 21, seq_len, dim)
     embs = baseline_x + alphas_x * delta #(alpha, 21, seq_len, dim)
     seq_len, dim = embs.shape[2], embs.shape[3]
-    embs = tf.reshape(embs, (len(alphas)*n_aa_var, seq_len, dim))# reshape to batch first
+    embs = tf.reshape(embs, (len(alphas)*n_aa_total, seq_len, dim))# reshape to batch first
     # baseline_x = tf.reshape(baseline_x, (len(alphas)*21, seq_len, dim))
     return embs, baseline
 
-def get_baseline(emb, baseline_med, seq_idx, baseline=None):
+def get_baseline(emb, baseline_med, seq_idx,  n_aa_f, n_aa_total, baseline=None):
     # get the baseline of all AAs interested
     # seq_idx is the index of the PTM happending
-    if seq_idx-half_aa_var<0 or seq_idx+half_aa_var+1>emb.shape[1]:
-        return None
     if baseline_med =='blank':
-        tile_emb = tf.tile(emb, (n_aa_var,1,1)).numpy() # duplicate the batch, (21, ?, ?)
-        for i in range(n_aa_var):
-            tile_emb[i,seq_idx-half_aa_var+i,:] = 0 # set as zero for specific aa
+        tile_emb = tf.tile(emb, (n_aa_total,1,1)).numpy() # duplicate the batch, (21, ?, ?)
+        for i in range(n_aa_total):
+            tile_emb[i,seq_idx-n_aa_f+i,:] = 0 # set as zero for specific aa
         
+    '''
     elif baseline_med == 'pad':
         tile_emb = tf.tile(emb, (n_aa_var,1,1)).numpy()
         baseline = tf.tile(baseline, (n_aa_var,1,1)).numpy()
         for i in range(n_aa_var):
             tile_emb[i, seq_idx-half_aa_var+i, :] = baseline[i, seq_idx-half_aa_var+i, :] # replace with pad baseline
-        
+    '''    
     tile_emb = tf.convert_to_tensor(tile_emb)
     return tile_emb
 
 
-def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=None, method=None, emb=None, baseline=None, graph=None):
+def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx,  n_aa_f, n_aa_total, embedding=None, method=None, emb=None, baseline=None, graph=None):
     """Computes the gradients of outputs w.r.t input embedding.
-
     Args:
         embedding: input embedding
         top_pred_idx: Predicted label for the input image
         seq_idx: location of the label
-
     Returns:
         Gradients of the predictions w.r.t embedding
     """
@@ -247,10 +253,10 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
         # test is pred is > pred_thres
         
         # batching since it's too big
-        alpha, seq_len, dim = embedding.shape[0]//n_aa_var, embedding.shape[1],embedding.shape[2]
-        embedding = tf.reshape(embedding, (alpha, n_aa_var, seq_len, dim))
+        alpha, seq_len, dim = embedding.shape[0]//n_aa_total, embedding.shape[1], embedding.shape[2]        
+        embedding = tf.reshape(embedding, (alpha, n_aa_total, seq_len, dim))
         final_grads = []
-        for i in range(n_aa_var):
+        for i in range(n_aa_total):
             with tf.GradientTape() as tape:
                 embed = embedding[:,i,:,:] #(alpha,)
                 tape.watch(embed)
@@ -263,26 +269,24 @@ def get_gradients(X, emb_model,  grad_model, top_pred_idx, seq_idx, embedding=No
             grads = tape.gradient(top_class, embed) # (alpha, seq, dim)
             grads = (grads[:-1] + grads[1:]) / tf.constant(2.0) # calculate integration
             integrated_grads = tf.math.reduce_mean(grads, axis = 0) * (emb[i,:,:] - baseline[i,:,:])  # integration
-            final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-half_aa_var+i, :], axis=-1).numpy()) #norm of the specific aa
+            final_grads.append(tf.reduce_sum(integrated_grads[ seq_idx-n_aa_f+i, :], axis=-1).numpy()) #norm of the specific aa
 
-        pdb.set_trace()
         return np.array(final_grads)
 
-def heatmap(a, highlight_idx, fle):
-    a = a[3:18]
+
+def saliencyplot(a, n_aa_f, n_aa_b,fle):
     fig, ax = plt.subplots(figsize=(10,5), layout='constrained')
-    a = np.squeeze(a)
-    ax.plot(list(range(-7,8,1)), a)
-    ax.scatter(0, a[7], 50, facecolors='none', edgecolors='black', linewidths=1.5)
-    # ax = sns.heatmap(a)
-    
-    # sns.lineplot(list(range(len(a))), a)
-    # plt.plot(highlight_idx, a[highlight_idx], markersize=29, fillstyle='none', markeredgewidth=1.5)
+    a = np.abs(np.squeeze(a))
+    ax.plot(list(range(-1*n_aa_f,n_aa_b+1,1)), a)
+    ax.scatter(0, a[n_aa_f], 50, facecolors='none', edgecolors='red', linewidths=1.5)
+    plt.title("Saliency Scores of Adjacent Amino Acids", fontsize=14)
+    plt.ylabel("Saliency Score", fontsize=12)
+    plt.xlabel("AA Sites Next to the PTM Site", fontsize=12)
+    plt.xticks(np.arange(-1*n_aa_f,n_aa_b+1, step=1)) # EDIT
     plt.show()
     plt.savefig(fle)
     plt.close()
     return a
-
     
 
 # def create_baseline(seq_len):
@@ -295,41 +299,6 @@ def pad_X( X, seq_len):
 def tokenize_seqs(seqs):
     # Note that tokenize_seq already adds <START> and <END> tokens.
     return [seq_tokens for seq_tokens in map(tokenize_seq, seqs)]
-
-# def make_gradcam_heatmap(model, pred_index=None):
-#     # First, we create a model that maps the input image to the activations
-#     # of the last conv layer as well as the output predictions
-#     grad_model = tf.keras.models.Model(
-#         [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
-#     )
-
-#     # Then, we compute the gradient of the top predicted class for our input image
-#     # with respect to the activations of the last conv layer
-#     with tf.GradientTape() as tape:
-#         last_conv_layer_output, preds = grad_model(img_array)
-#         if pred_index is None:
-#             pred_index = tf.argmax(preds[0])
-#         class_channel = preds[:, pred_index]
-
-#     # This is the gradient of the output neuron (top predicted or chosen)
-#     # with regard to the output feature map of the last conv layer
-#     grads = tape.gradient(class_channel, last_conv_layer_output)
-
-#     # This is a vector where each entry is the mean intensity of the gradient
-#     # over a specific feature map channel
-#     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-
-#     # We multiply each channel in the feature map array
-#     # by "how important this channel is" with regard to the top predicted class
-#     # then sum all the channels to obtain the heatmap class activation
-#     last_conv_layer_output = last_conv_layer_output[0]
-#     heatmap = last_conv_layer_output @ pooled_grads[..., tf.newaxis]
-#     heatmap = tf.squeeze(heatmap)
-
-#     # For visualization purpose, we will also normalize the heatmap between 0 & 1
-#     heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
-#     return heatmap.numpy()
-
 
 if __name__ == '__main__':
     app.run(main)
