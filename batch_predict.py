@@ -13,6 +13,7 @@ from tqdm import tqdm
 from pprint import pprint
 
 import json
+import pandas as pd
 from Bio import SeqIO
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -84,7 +85,6 @@ def cut_protein(sequence, seq_len):
     return records
 
 
-
 def main(argv):
     FLAGS = flags.FLAGS
 
@@ -119,7 +119,6 @@ def main(argv):
         #     sequence = str(rec.seq)
         #     uid = str(rec.id)
 
-        
     # for i in range(1):#place holder
     # with open('/workspace/PTM/Data/OPTM/nonoverlap_uid.txt') as f:    
     #     for line in tqdm(f):
@@ -190,7 +189,7 @@ def main(argv):
                     # idx = [j for j in range(len((seq))) if seq[j] in label2aa[ptm]]
                     for i in idx:
                         ix = i+chunk_ids[ch]*(FLAGS.seq_len-2)//2
-                        y_preds[str(uids[ch])+'_'+str(ix)+'_'+ptm] = str(y_pred_sum[ch, i+1,label_to_index[ptm]])
+                        y_preds[str(uids[ch])+'_'+str(ix+1)+'_'+ptm] = str(y_pred_sum[ch, i+1,label_to_index[ptm]])
 
             seqs = []
             chunk_ids = []
@@ -201,7 +200,12 @@ def main(argv):
 
     with open(os.path.join(FLAGS.res_path,'result.json'),'w') as fw:
         json.dump(y_preds, fw)
-
+    
+    correct_pred = {k: v for k, v in y_preds.items() if float(v) >= 0.5}
+    splitted = [txt.split("_") for txt in [key for key in {k: v for k, v in y_preds.items() if float(v) >= 0.5}]]
+    correct_df = pd.DataFrame(list(zip([x[0] for x in splitted], [x[1] for x in splitted],["_".join((x[2],x[3])) for x in splitted],[v for v in correct_pred.values()])),columns =['uid','site','PTM_type','pred_score'])
+    correct_df = correct_df.sort_values(by=['pred_score'], ascending=False)
+    correct_df.to_csv(os.path.join(FLAGS.res_path,'correct_predictions.csv'), index=False)
     
 def pad_X( X, seq_len):
     return np.array(X + (seq_len - len(X)) * [additional_token_to_index['<PAD>']])
@@ -209,7 +213,6 @@ def pad_X( X, seq_len):
 def tokenize_seqs(seqs):
     # Note that tokenize_seq already adds <START> and <END> tokens.
     return [seq_tokens for seq_tokens in map(tokenize_seq, seqs)]
-
 
 if __name__ == '__main__':
     app.run(main)
