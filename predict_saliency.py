@@ -83,9 +83,7 @@ def build_model_graph(FLAGS, optimizer , unique_labels, pretrain_model):
     print(model.model.summary())
     return model   
 
-'''from knockknock import email_sender
 
-@email_sender(recipient_emails="<xinr77@gmail.com>", sender_email="<xinr@g.ucla.edu>")'''
 def main(argv):
     FLAGS = flags.FLAGS
     label2aa = {'Hydro_K':'K','Hydro_P':'P','Methy_K':'K','Methy_R':'R','N6-ace_K':'K','Palm_C':'C',
@@ -119,7 +117,7 @@ def main(argv):
         uid = rec.id
         sequence=str(rec.seq) 
         
-        records = cut_protein(sequence, FLAGS.seq_len, label2aa['Phos_ST']) # chunk the protein into segments
+        records = cut_protein(sequence, FLAGS.seq_len, label2aa[FLAGS.ptm_type]) # chunk the protein into segments
         preds = {}
 
         for record in records:
