@@ -21,6 +21,7 @@ def gen_fig(orig, mutant, res_path, protid, mutation):
     mutant_df = pd.DataFrame.from_dict(mutant, orient="index", columns=["Mutant_Prob"])
     df = orig_df.merge(mutant_df, left_index=True, right_index=True)
     df["Effect"] = df["Mutant_Prob"].astype(float) - df["Orig_Prob"].astype(float)
+    df.to_csv(os.path.join(res_path, f"{protid}_{mutation}.csv"))
     df = df.reset_index()
     df['PTM'] = df['index']
     df['index'] = df.index
