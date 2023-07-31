@@ -7,7 +7,6 @@ import os
 import sys
 import tensorflow as tf
 from tensorflow import keras
-# import tensorflow_addons as tfa
 from datetime import datetime
 from tqdm import tqdm
 from pprint import pprint
@@ -18,7 +17,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
-import pdb
 
 from src.utils import get_class_weights, handle_flags
 from src import utils
@@ -110,78 +108,80 @@ def main(argv):
     with open(FLAGS.data_path, 'r') as fp:
         dat = list(SeqIO.parse(fp, 'fasta'))  # input data
 
-    site = FLAGS.site-1     
+    sites = [s-1 for s in list(map(int, FLAGS.site.split(',')))]
+    ptm_types = FLAGS.ptm_type.split(',')
+    assert len(sites) == len(ptm_types), "The number of sites and PTM_types must match" 
+    
+    for site, ptm_type in zip(sites, ptm_types):
+        for rec in tqdm(dat):
 
-    for rec in tqdm(dat):
-
-        uid = rec.id
-        sequence=str(rec.seq) 
-        
-        records = cut_protein(sequence, FLAGS.seq_len, label2aa[FLAGS.ptm_type]) # chunk the protein into segments
-        preds = {}
-
-        for record in records:
-            seq = record['seq']
-            idx = record['idx']
-            chunk_id = record['chunk_id']
-            if chunk_id is None:
-                name_id = ''
-                chunk_id = 0
-            else:
-                name_id = '~'+str(chunk_id)
+            uid = rec.id
+            sequence=str(rec.seq) 
             
-            if FLAGS.graph:
-                adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
-                adj = np.expand_dims(adj, 0)
+            records = cut_protein(sequence, FLAGS.seq_len, label2aa[ptm_type]) # chunk the protein into segments
+            preds = {}
 
-            X = pad_X(tokenize_seq(seq), FLAGS.seq_len) # tokenized and pad the input
-            if FLAGS.graph:
-                X = [tf.expand_dims(X, 0),adj, tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-            else:
-                X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])] # [pad_x, pos_enc]
-            
-            # to identify the range for prediction
-            if chunk_id==0: # for beginning chunk
-                cover_range = (0,chunk_size//4*3)
-            elif chunk_id==((len(sequence)-1)//-1): # for the ending chunk
-                cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
-            else: # the rest
-                cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
-
-            # only get gradient when the seq_idx fall in the range
-            
-            if site >=cover_range[0] and site < cover_range[1]:
-                # get gradient for specific ptm
-                seq_idx = site - chunk_id*chunk_size//2 
-                temp_label = FLAGS.ptm_type 
-                pred_score =  model(X).numpy() # make predictions
-                pred_score = pred_score.reshape(1, -1,13)
-                # pdb.set_trace()
-                # integrated gradients
-                print('The prediction scores of site %d for %s is %f'%(site+1, FLAGS.ptm_type, pred_score[0, seq_idx+1, label_to_index[temp_label]]))
-                fig_name = os.path.join(FLAGS.res_path, '_'.join([uid,str(site+1), FLAGS.ptm_type])) # EDIT
-                emb = emb_model(X) # Get embedding
-                m_steps = 50 # how many intervals to create
-                alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
-                # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
-                # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
-                # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
+            for record in records:
+                seq = record['seq']
+                idx = record['idx']
+                chunk_id = record['chunk_id']
+                if chunk_id is None:
+                    name_id = ''
+                    chunk_id = 0
+                else:
+                    name_id = '~'+str(chunk_id)
                 
-                # account for PTM hapenning within the first 10 and last 10 positions on the sequence
-                n_aa_f, n_aa_b = half_aa_var, half_aa_var
-                if len(sequence) -1- site < half_aa_var:
-                    n_aa_b = len(sequence) - 1- site
-                elif site-half_aa_var<0:
-                    n_aa_f = site
-                n_aa_total = n_aa_f+n_aa_b+1
+                if FLAGS.graph:
+                    adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
+                    adj = np.expand_dims(adj, 0)
 
-                interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1, n_aa_f, n_aa_total) # get the interpolated embedding
-                if interpolated_emb is None:
-                    continue
-                emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[FLAGS.ptm_type], \
-                            seq_idx+1, n_aa_f, n_aa_total, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(n_aa_total,1,1)), baseline=baseline)
-                # if prob>0.9:
-                zero_local = saliencyplot(emb_grads, n_aa_f, n_aa_b,fle=(fig_name))
+                X = pad_X(tokenize_seq(seq), FLAGS.seq_len) # tokenized and pad the input
+                if FLAGS.graph:
+                    X = [tf.expand_dims(X, 0),adj, tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+                else:
+                    X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])] # [pad_x, pos_enc]
+                
+                # to identify the range for prediction
+                if chunk_id==0: # for beginning chunk
+                    cover_range = (0,chunk_size//4*3)
+                elif chunk_id==((len(sequence)-1)//-1): # for the ending chunk
+                    cover_range = (chunk_size//4+chunk_id*chunk_size//2, len(sequence))
+                else: # the rest
+                    cover_range = (chunk_size//4+chunk_id*chunk_size//2, chunk_size//4+(chunk_id+1)*chunk_size//2)
+
+                # only get gradient when the seq_idx fall in the range
+                if site >=cover_range[0] and site < cover_range[1]:
+                    # get gradient for specific ptm
+                    seq_idx = site - chunk_id*chunk_size//2 
+                    temp_label = ptm_type 
+                    pred_score =  model(X).numpy() # make predictions
+                    pred_score = pred_score.reshape(1, -1,13)
+
+                    # integrated gradients
+                    print('The prediction scores of site %d for %s is %f'%(site+1, ptm_type, pred_score[0, seq_idx+1, label_to_index[temp_label]]))
+                    fig_name = os.path.join(FLAGS.res_path, '_'.join([uid,str(site+1), ptm_type])) # EDIT
+                    emb = emb_model(X) # Get embedding
+                    m_steps = 50 # how many intervals to create
+                    alphas = tf.linspace(start=0.0, stop=1.0, num=m_steps+1) # Generate m_steps intervals for integral_approximation() below.
+                    # pad_seq = [additional_token_to_index['<START>']] + [additional_token_to_index['<PAD>']]*(FLAGS.seq_len-2) +[additional_token_to_index['<END>']]
+                    # pad_baseline = emb_model([tf.expand_dims(pad_seq, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])])
+                    # interpolated_emb, baseline = interpolate_emb(emb, alphas, pad_baseline)
+                    
+                    # account for PTM hapenning within the first 10 and last 10 positions on the sequence
+                    n_aa_f, n_aa_b = half_aa_var, half_aa_var
+                    if len(sequence) -1- site < half_aa_var:
+                        n_aa_b = len(sequence) - 1- site
+                    elif site-half_aa_var<0:
+                        n_aa_f = site
+                    n_aa_total = n_aa_f+n_aa_b+1
+
+                    interpolated_emb, baseline = interpolate_emb(emb, alphas, seq_idx+1, n_aa_f, n_aa_total) # get the interpolated embedding
+                    if interpolated_emb is None:
+                        continue
+                    emb_grads = get_gradients(X, emb_model, grad_model, label_to_index[ptm_type], \
+                                seq_idx+1, n_aa_f, n_aa_total, interpolated_emb, method='integrated_gradient', emb=tf.tile(emb,(n_aa_total,1,1)), baseline=baseline)
+                    # if prob>0.9:
+                    zero_local = saliencyplot(emb_grads, n_aa_f, n_aa_b,fle=(fig_name))
   
 
 def interpolate_emb( emb, alphas, seq_idx,  n_aa_f, n_aa_total, baseline_med='blank', baseline=None):
