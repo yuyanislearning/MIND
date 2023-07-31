@@ -7,7 +7,6 @@ import os
 import sys
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_addons as tfa
 from datetime import datetime
 from tqdm import tqdm
 from pprint import pprint
