@@ -25,6 +25,7 @@ def gen_fig(orig, mutant, res_path, protid, mutation):
     df = df.reset_index()
     df['PTM'] = df['index']
     df['index'] = df.index
+    df[["PTM", "Orig_Prob", "Mutant_Prob", "Effect"]].to_csv(os.path.join(res_path, f"{protid}_{mutation}.csv"), index=False)
 
     # plot data
     sns.set_theme(style='dark')

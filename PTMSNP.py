@@ -7,7 +7,6 @@ import os
 import sys
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_addons as tfa
 from datetime import datetime
 from tqdm import tqdm
 from pprint import pprint
@@ -156,20 +155,9 @@ def main(argv):
         rec = list(SeqIO.parse(fp, 'fasta'))[0]
             
     uid = rec.id.split('|')[1]
-    sequence=str(rec.seq)        
-    snp = FLAGS.snp.split('_')
-    
+    sequence=str(rec.seq) 
+
     y_preds = {}
-    y_preds_mut = {}
-    
-    # sequence = dat[uid]['seq']
-    SNP_site = int(snp[1])
-    SNP_var = snp[2]
-    SNP_wt = snp[0]
-    SNP_index = SNP_site-1
-    assert sequence[SNP_index]==SNP_wt
-    SNP_sequence = sequence[:SNP_index] + SNP_var + sequence[(SNP_index + 1):]
-    
     records = cut_protein(sequence, FLAGS.seq_len, None)#label2aa[FLAGS.label] 
 
     for record in records:
@@ -208,48 +196,66 @@ def main(argv):
                 ix = i+chunk_id*(FLAGS.seq_len-2)//2+1
                 y_preds[str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
 
-    records = cut_protein(SNP_sequence, FLAGS.seq_len, None)#label2aa[FLAGS.label] 
-
-    for record in records:
-        seq = record['seq']
-        chunk_id = record['chunk_id']
-        if chunk_id is None:
-            name_id = ''
-            chunk_id = 0
-        else:
-            name_id = '~'+str(chunk_id)
-
-        # adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
-        # adj = np.expand_dims(adj, 0)
-        X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
-        X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
-        
-        for j in range(FLAGS.n_fold):#fold
-            y_pred = models[j](X)#*weights[ptm][j]                    
-            y_pred = y_pred.numpy().reshape(1, FLAGS.seq_len, -1)
-            temp_weight = np.array([weights[p][j] for p in weights])
-            y_pred = y_pred*temp_weight#TODO 
-            if j==0:
-                y_pred_sum = y_pred
-            else:
-                y_pred_sum += y_pred
-
-        for ptm in label2aa.keys():
-            if chunk_id==0:
-                cover_range = (0,quar_chunk_size*3)
-            elif chunk_id==((len(sequence)-1)//half_chunk_size-1):
-                cover_range = (quar_chunk_size, len(sequence)-chunk_id*half_chunk_size)
-            else:
-                cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
-            idx = [j for j in range(len((seq))) if (seq[j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
-
-            for i in idx:
-                ix = i+chunk_id*(FLAGS.seq_len-2)//2 +1
-                y_preds_mut[str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
-    with open(os.path.join(FLAGS.res_path, uid+'_'+SNP_wt+str(SNP_site)+SNP_var+'.json'),'w') as fw:
-        json.dump(y_preds_mut, fw)
     with open(os.path.join(FLAGS.res_path, uid+'.json'),'w') as fw:
         json.dump(y_preds, fw)
+
+
+    snps = FLAGS.snp.split(',')
+
+    for snp in snps:
+        snp = snp.split('_')
+        
+        y_preds_mut = {}
+        
+        # sequence = dat[uid]['seq']
+        SNP_site = int(snp[1])
+        SNP_var = snp[2]
+        SNP_wt = snp[0]
+        SNP_index = SNP_site-1
+        assert sequence[SNP_index]==SNP_wt
+        SNP_sequence = sequence[:SNP_index] + SNP_var + sequence[(SNP_index + 1):]
+
+        records = cut_protein(SNP_sequence, FLAGS.seq_len, None)#label2aa[FLAGS.label] 
+
+        for record in records:
+            seq = record['seq']
+            chunk_id = record['chunk_id']
+            if chunk_id is None:
+                name_id = ''
+                chunk_id = 0
+            else:
+                name_id = '~'+str(chunk_id)
+
+            # adj = np.load('./ttt/'+uid+name_id+'_514_5.npy')
+            # adj = np.expand_dims(adj, 0)
+            X = pad_X(tokenize_seq(seq), FLAGS.seq_len)
+            X = [tf.expand_dims(X, 0), tf.tile(positional_encoding(FLAGS.seq_len, FLAGS.d_model), [1,1,1])]
+            
+            for j in range(FLAGS.n_fold):#fold
+                y_pred = models[j](X)#*weights[ptm][j]                    
+                y_pred = y_pred.numpy().reshape(1, FLAGS.seq_len, -1)
+                temp_weight = np.array([weights[p][j] for p in weights])
+                y_pred = y_pred*temp_weight#TODO 
+                if j==0:
+                    y_pred_sum = y_pred
+                else:
+                    y_pred_sum += y_pred
+
+            for ptm in label2aa.keys():
+                if chunk_id==0:
+                    cover_range = (0,quar_chunk_size*3)
+                elif chunk_id==((len(sequence)-1)//half_chunk_size-1):
+                    cover_range = (quar_chunk_size, len(sequence)-chunk_id*half_chunk_size)
+                else:
+                    cover_range = (quar_chunk_size, quar_chunk_size+half_chunk_size)
+                idx = [j for j in range(len((seq))) if (seq[j] in label2aa[ptm] and j >= cover_range[0] and j < cover_range[1])]
+
+                for i in idx:
+                    ix = i+chunk_id*(FLAGS.seq_len-2)//2 +1
+                    y_preds_mut[str(ix)+'_'+ptm] = str(y_pred_sum[0, i+1,label_to_index[ptm]])
+        with open(os.path.join(FLAGS.res_path, uid+'_'+SNP_wt+str(SNP_site)+SNP_var+'.json'),'w') as fw:
+            json.dump(y_preds_mut, fw)
+
 
 
 def pad_X( X, seq_len):
