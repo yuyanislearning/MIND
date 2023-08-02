@@ -398,7 +398,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
                     all_neg_index = set(all_neg_index) - pos_index
                     all_neg_index = np.array([j for j in all_neg_index])
                     # sampling
-                    n_pos = int(np.sum(sample_weights[i,:,0]))
+                    n_pos = int(np.sum(sample_weights[i,:,0]>0))
                     if len(all_neg_index)==0 or n_pos==0:
                         continue
                     if n_pos <= len(all_neg_index):#if more neg than neg
@@ -421,7 +421,7 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
                         all_neg_index = set(all_neg_index) - pos_index
                         all_neg_index = np.array([j for j in all_neg_index])
                         # sampling
-                        n_pos = int(np.sum(sample_weights[i,:,self.label_to_index[u]]))
+                        n_pos = int(np.sum(sample_weights[i,:,self.label_to_index[u]]>0))
                         if len(all_neg_index)<1 or n_pos==0:
                             continue
                         if n_pos <= len(all_neg_index):#if more pos than neg
