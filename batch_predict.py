@@ -10,6 +10,7 @@ from tensorflow import keras
 from datetime import datetime
 from tqdm import tqdm
 from pprint import pprint
+import pdb
 
 import json
 import pandas as pd
@@ -137,8 +138,10 @@ def main(argv):
         uid = rec.id.split('|')[1]
         sequence=str(rec.seq)
         records = cut_protein(sequence, FLAGS.seq_len)
+        rec_count = 0
         for record in records:
             count+=1
+            rec_count+=1
             seq = record['seq']
             chunk_id = record['chunk_id']
             seqs.append(seq)
@@ -151,7 +154,7 @@ def main(argv):
             #     id = uid + '~' + str(chunk_id) if len(records)>1 else uid
             #     adj = np.load('./temp/'+id+'_'+str(FLAGS.seq_len)+'_5'+'.npy', allow_pickle=True) 
             #     adjs.append(adj)
-            if count<FLAGS.batch_size and dat_count!=len(dat)-1:
+            if count<FLAGS.batch_size and dat_count<len(dat)-1:
                 continue
             pad_Xs = np.stack(pad_Xs, axis=0)
             X = [pad_Xs]
@@ -159,7 +162,7 @@ def main(argv):
             #     adjs = np.stack(adjs, axis=0)
             #     X.append(adjs)
             
-            
+
             batch_size = pad_Xs.shape[0]
             X.append(np.zeros((batch_size, 514, 128)))
             
@@ -195,6 +198,7 @@ def main(argv):
             uids = []
             pad_Xs = []
             adjs = []
+            sequences = []
             count=0
 
     with open(os.path.join(FLAGS.res_path,'result.json'),'w') as fw:
