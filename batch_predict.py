@@ -21,7 +21,7 @@ import re
 from sklearn.metrics import f1_score, precision_recall_curve, auc, roc_auc_score, accuracy_score, confusion_matrix, average_precision_score
 from os.path import exists
 
-from src.utils import get_class_weights, handle_flags
+from src.utils import get_class_weights, handle_flags, assign_neighbour, rm_diag, pad_adj
 from src import utils
 from src.tokenization import additional_token_to_index, n_tokens, tokenize_seq, parse_seq, aa_to_token_index, index_to_token
 
@@ -150,19 +150,19 @@ def main(argv):
             pad_Xs.append(X)
             uids.append(uid)
             sequences.append(sequence)
-            # if FLAGS.graph:
-            #     id = uid + '~' + str(chunk_id) if len(records)>1 else uid
-            #     adj = np.load('./temp/'+id+'_'+str(FLAGS.seq_len)+'_5'+'.npy', allow_pickle=True) 
-            #     adjs.append(adj)
+            if FLAGS.graph:
+                get_graph(uid,X,  FLAGS)
+                id = uid + '~' + str(chunk_id) if len(records)>1 else uid
+                adj = np.load('./temp/'+id+'_'+str(FLAGS.seq_len)+'_5'+'.npy', allow_pickle=True) 
+                adjs.append(adj)
             if count<FLAGS.batch_size and dat_count<len(dat)-1:
                 continue
             pad_Xs = np.stack(pad_Xs, axis=0)
             X = [pad_Xs]
-            # if FLAGS.graph:
-            #     adjs = np.stack(adjs, axis=0)
-            #     X.append(adjs)
+            if FLAGS.graph:
+                adjs = np.stack(adjs, axis=0)
+                X.append(adjs)
             
-
             batch_size = pad_Xs.shape[0]
             X.append(np.zeros((batch_size, 514, 128)))
             
@@ -216,6 +216,46 @@ def pad_X( X, seq_len):
 def tokenize_seqs(seqs):
     # Note that tokenize_seq already adds <START> and <END> tokens.
     return [seq_tokens for seq_tokens in map(tokenize_seq, seqs)]
+
+
+def get_graph(uid,X,  FLAGS):
+    print('constructing graphs')
+    adj_name = './temp/'+uid+'_'+str(FLAGS.seq_len)+'_'+str(FLAGS.fill_cont)+'.npy'
+    if not exists(adj_name):
+        if '~' in uid:
+            n_seq = int(uid.split('~')[1])
+            tuid = uid.split('~')[0]
+
+            if exists(FLAGS.adj_dir+tuid+'.cont_map.npy'):
+                adj = np.load(FLAGS.adj_dir+tuid+'.cont_map.npy')
+                n = adj.shape[0]
+                left_slice = n_seq*FLAGS.chunk_size//2
+                right_slice = min((n_seq+2)*FLAGS.chunk_size//2, n)
+                adj = adj[left_slice:right_slice, left_slice:right_slice]
+            else:
+                n = np.where(np.array(X)==24)[0][0]-1
+                adj = np.zeros((n,n))
+                adj = assign_neighbour(adj, FLAGS.fill_cont)
+        else:
+            if exists(FLAGS.adj_dir+uid+'.cont_map.npy'):
+                adj = np.load(FLAGS.adj_dir+uid+'.cont_map.npy')
+                adj = rm_diag(adj,FLAGS.fill_cont)
+            else:
+                # 24 is the stop sign
+                n = np.where(np.array(X)==24)[0][0]-1
+                adj = np.zeros((n,n))
+                adj = assign_neighbour(adj, FLAGS.fill_cont)
+        adj = pad_adj(adj, FLAGS.seq_len)
+        
+        np.save(adj_name,adj)
+    else:
+        next
+        # try:
+        #     adj = np.load(adj_name)
+        # except:
+        #     os.system('rm '+ adj_name)
+
+    return None
 
 if __name__ == '__main__':
     app.run(main)
