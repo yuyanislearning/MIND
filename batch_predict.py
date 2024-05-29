@@ -135,7 +135,11 @@ def main(argv):
     with open(FLAGS.data_path, 'r') as fp:
         dat = list(SeqIO.parse(fp, 'fasta'))            
     for dat_count, rec in tqdm(enumerate(dat)):
-        uid = rec.id.split('|')[1]
+        seqid = rec.id
+        if len(seqid.split('|')) >= 2:
+            uid = seqid.split('|')[1]
+        else:
+            uid = seqid
         sequence=str(rec.seq)
         records = cut_protein(sequence, FLAGS.seq_len)
         rec_count = 0
