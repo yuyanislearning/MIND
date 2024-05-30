@@ -127,7 +127,9 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST',
         "Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
         "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
-        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
+        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V",'S-nitrosylation_C':'C','S-succination_C':'C','S-persulfidation_C':'C',
+        'S-sulfenylation_C':'C', 'S-prenylation_C':'C','S-glutathionylation_C':'C','S-disulfidation_C':'C','S-itaconation_C':'C',
+        }
         # get unique labels
         self.unique_labels = sorted(set([l['ptm_type'] for d in records for l in d['label'] ]))
 
@@ -291,7 +293,9 @@ class PTMDataGenerator(tf.keras.utils.Sequence): #MetO_M
         'Phos_ST':'ST','Phos_Y':'Y','Pyro_Q':'Q','SUMO_K':'K','Ubi_K':'K','glyco_N':'N','glyco_ST':'ST',
         "Arg-OH_R":'R',"Asn-OH_N":'N',"Asp-OH_D":'D',"Cys4HNE_C":"C","CysSO2H_C":"C","CysSO3H_C":"C",
         "Lys-OH_K":"K","Lys2AAA_K":"K","MetO_M":"M","MetO2_M":"M","Phe-OH_F":"F",
-        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V"}
+        "ProCH_P":"P","Trp-OH_W":"W","Tyr-OH_Y":"Y","Val-OH_V":"V",'S-nitrosylation_C':'C','S-succination_C':'C','S-persulfidation_C':'C',
+        'S-sulfenylation_C':'C', 'S-prenylation_C':'C','S-glutathionylation_C':'C','S-disulfidation_C':'C','S-itaconation_C':'C',
+        }
         # get unique labels
         val_aug.unique_labels = self.unique_labels
         val_aug.label_to_index = self.label_to_index
