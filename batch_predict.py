@@ -135,7 +135,11 @@ def main(argv):
     with open(FLAGS.data_path, 'r') as fp:
         dat = list(SeqIO.parse(fp, 'fasta'))            
     for dat_count, rec in tqdm(enumerate(dat)):
-        uid = rec.id.split('|')[1]
+        seqid = rec.id
+        if len(seqid.split('|')) >= 2:
+            uid = seqid.split('|')[1]
+        else:
+            uid = seqid
         sequence=str(rec.seq)
         records = cut_protein(sequence, FLAGS.seq_len)
         rec_count = 0
@@ -191,7 +195,7 @@ def main(argv):
                     # idx = [j for j in range(len((seq))) if seq[j] in label2aa[ptm]]
                     for i in idx:
                         ix = i+chunk_ids[ch]*(FLAGS.seq_len-2)//2
-                        y_preds[str(uids[ch])+'_'+str(ix+1)+'_'+ptm] = str(y_pred_sum[ch, i+1,label_to_index[ptm]])
+                        y_preds[(str(uids[ch]), str(ix+1), ptm)] = str(y_pred_sum[ch, i+1,label_to_index[ptm]])
 
             seqs = []
             chunk_ids = []
@@ -202,11 +206,11 @@ def main(argv):
             count=0
 
     with open(os.path.join(FLAGS.res_path,'result.json'),'w') as fw:
-        json.dump(y_preds, fw)
+        json.dump({f"{a}_{b}_{c}": v for (a, b, c), v in y_preds.items()}, fw)
     
     correct_pred = {k: v for k, v in y_preds.items() if float(v) >= 0.5}
-    splitted = [txt.split("_") for txt in [key for key in {k: v for k, v in y_preds.items() if float(v) >= 0.5}]]
-    correct_df = pd.DataFrame(list(zip([x[0] for x in splitted], [x[1] for x in splitted],["_".join((x[2],x[3])) for x in splitted],[v for v in correct_pred.values()])),columns =['uid','site','PTM_type','pred_score'])
+    correct_df_data = [list(k) + [v] for k, v in correct_pred.items()]
+    correct_df = pd.DataFrame(correct_df_data, columns =['uid','site','PTM_type','pred_score'])
     correct_df = correct_df.sort_values(by=['pred_score'], ascending=False)
     correct_df.to_csv(os.path.join(FLAGS.res_path,'correct_predictions.csv'), index=False)
     
