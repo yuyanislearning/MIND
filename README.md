@@ -17,10 +17,9 @@ We suggest building environment via docker or conda or using platforms with tens
 ### Build environment from docker file (Optional)
 We provide a Dockerfile which directly sets up the tensorflow and relevant package. More information about docker can be found [here](https://www.docker.com/). 
 The prerequisite for using the docker can be found [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/tensorflow).
-After prerequisite is satisfied, you can download the dockerfile [here](https://drive.google.com/file/d/1SlUNKthEDH_RuTkDI02g8bmZa0lig7BL/view?usp=sharing)
+After prerequisite is satisfied, you can use the dockerfile [here](docker_build/Dockerfile)
 Run the following to build a docker image
 ```bash
-mkdir docker_build
 cd docker_build
 ```
 ```bash
